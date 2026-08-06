@@ -73,7 +73,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const finishConfig = () => {
-        const ready = config.channels.some((channel) => channel.models.length && (channel.provider === "supertoken" ? Boolean(channel.supertoken?.resourceApiKey.trim() && (channel.supertoken.imageApiKey.trim() || channel.supertoken.videoApiKey.trim())) : Boolean(channel.baseUrl.trim() && channel.apiKey.trim())));
+        const ready = selectableModelsByCapability(config).length > 0;
         setConfigDialogOpen(false);
         if (!ready) return;
         message.success(t(shouldPromptContinue ? "config.savedContinue" : "config.saved"));
@@ -107,10 +107,6 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const deleteChannel = (id: string) => {
-        if (config.channels.length <= 1) {
-            message.warning(t("config.channels.keepOne"));
-            return;
-        }
         updateChannels(config.channels.filter((channel) => channel.id !== id));
     };
 
@@ -233,6 +229,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                                 value={config[group.modelKey]}
                                                 onChange={(model) => updateConfigPatch({ [group.modelKey]: model, ...(group.capability === "video" ? superTokenVideoConfigPatch(config, model, true) || {} : {}) })}
                                                 capability={group.capability}
+                                                onMissingConfig={() => setActiveTab("channels")}
                                                 fullWidth
                                             />
                                         </Form.Item>
@@ -374,9 +371,11 @@ function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
         apiKey: channels[0]?.apiKey || config.apiKey,
         apiFormat: channels[0]?.apiFormat || config.apiFormat,
     };
+    const imageModel = pickDefaultModel(next, "image", config.imageModel);
     return {
         ...next,
-        imageModel: pickDefaultModel(next, "image", config.imageModel),
+        model: imageModel,
+        imageModel,
         videoModel: pickDefaultModel(next, "video", config.videoModel),
         textModel: pickDefaultModel(next, "text", config.textModel),
         audioModel: pickDefaultModel(next, "audio", config.audioModel),

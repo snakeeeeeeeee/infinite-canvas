@@ -20,18 +20,45 @@ const {
     defaultConfig,
     encodeChannelModel,
     resolveModelRequestConfig,
+    selectableModelsByCapability,
     superTokenVideoConfigPatch,
 } = await import("../src/stores/use-config-store");
 const { resetInterruptedGeneration } = await import("../src/lib/canvas/canvas-generation-helpers");
 const { CanvasNodeType } = await import("../src/types/canvas");
 
 describe("SuperToken channel configuration", () => {
-    test("keeps the original default channel and models for new installs", () => {
-        expect(defaultConfig.channels[0]).toMatchObject({ id: "default", provider: "custom", baseUrl: "https://api.openai.com" });
-        expect(defaultConfig.channels[0].models.map((model) => model.name)).toEqual(["gpt-image-2", "grok-imagine-video", "gpt-5.5", "gpt-4o-mini-tts"]);
-        expect(defaultConfig.channels[1]).toMatchObject({ id: "supertoken", provider: "supertoken", models: [] });
-        expect(defaultConfig.imageModel).toBe("default::gpt-image-2");
-        expect(defaultConfig.videoModel).toBe("default::grok-imagine-video");
+    test("starts new installs without channels or models", () => {
+        expect(defaultConfig.channels).toEqual([]);
+        expect(defaultConfig.models).toEqual([]);
+        expect(defaultConfig.imageModel).toBe("");
+        expect(defaultConfig.videoModel).toBe("");
+    });
+
+    test("enables SuperToken image and video models independently", () => {
+        const imageOnly = createSuperTokenChannel({
+            supertoken: { region: "cn", imageApiKey: "image-key", videoApiKey: "", resourceApiKey: "resource-key", imageModels: ["gpt-image-2"], videoModels: ["adobe-kling-3.0-720p"] },
+        });
+        const imageConfig = { ...defaultConfig, channels: [imageOnly] };
+        expect(selectableModelsByCapability(imageConfig, "image")).toEqual([encodeChannelModel("supertoken", "gpt-image-2")]);
+        expect(selectableModelsByCapability(imageConfig, "video")).toEqual([]);
+
+        const videoOnly = createSuperTokenChannel({
+            supertoken: { region: "cn", imageApiKey: "", videoApiKey: "video-key", resourceApiKey: "resource-key", imageModels: ["gpt-image-2"], videoModels: ["adobe-kling-3.0-720p"] },
+        });
+        const videoConfig = { ...defaultConfig, channels: [videoOnly] };
+        expect(selectableModelsByCapability(videoConfig, "image")).toEqual([]);
+        expect(selectableModelsByCapability(videoConfig, "video")).toEqual([encodeChannelModel("supertoken", "adobe-kling-3.0")]);
+
+        const missingResource = createSuperTokenChannel({ ...imageOnly, supertoken: { ...imageOnly.supertoken!, resourceApiKey: "" } });
+        expect(selectableModelsByCapability({ ...defaultConfig, channels: [missingResource] })).toEqual([]);
+    });
+
+    test("only exposes models from configured custom channels", () => {
+        const incomplete = createModelChannel({ models: [{ name: "custom-image", capability: "image" }] });
+        expect(selectableModelsByCapability({ ...defaultConfig, channels: [incomplete] }, "image")).toEqual([]);
+
+        const ready = createModelChannel({ ...incomplete, apiKey: "custom-key" });
+        expect(selectableModelsByCapability({ ...defaultConfig, channels: [ready] }, "image")).toEqual([encodeChannelModel(ready.id, "custom-image")]);
     });
 
     test("normalizes a legacy custom channel without changing its request path", () => {

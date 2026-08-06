@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
+import { Cpu, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
@@ -23,8 +23,8 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const options = useMemo(() => Array.from(new Set([...(config.channelMode === "local" && !capability ? [value] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model)))), [capability, config, value]);
-    const current = value || "";
-    const pickerPlaceholder = placeholder || t("settingsPanels.model.select");
+    const current = value && options.includes(value) ? value : "";
+    const pickerPlaceholder = placeholder || t(options.length ? "settingsPanels.model.select" : "settingsPanels.model.configure");
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -39,7 +39,11 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             open={open}
             value={current}
             onOpenChange={(nextOpen) => {
-                if (nextOpen && !options.length && config.channelMode === "local") onMissingConfig?.();
+                if (nextOpen && !options.length && onMissingConfig) {
+                    onMissingConfig();
+                    setOpen(false);
+                    return;
+                }
                 if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
                 setOpen(nextOpen);
             }}
@@ -101,6 +105,7 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
 }
 
 function ModelIcon({ model }: { model: string }) {
+    if (!model) return <Settings2 className="size-4 shrink-0 opacity-70" />;
     const icon = resolveModelIcon(modelOptionName(model));
     return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
 }

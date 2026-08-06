@@ -16,7 +16,8 @@ The current release needs manual verification in these areas:
 - Prompt Center layout, source synchronization, search, asset insertion, prompt detail dialogs, and compact split-layout prompt pickers in the image and video workbenches.
 - Settings import/export, Volcengine Ark protocol handling, and WebDAV-related configuration.
 - Local source Docker Compose deployment should serve the frontend at host port 10001 while the container continues listening on port 3000.
-- SuperToken provider setup with fixed mainland/global regions, separate image/video Model API Keys, a Resource API Key, partial or full model refresh, and video choices limited to Kling, Seedance 2.0, and MiniMax H3.
+- Provider empty state: new installs should have no built-in providers or default models; model selectors without a usable provider should open provider settings directly instead of showing an empty menu.
+- SuperToken provider setup with fixed mainland/global regions, independent image/video Model API Keys, a shared Resource API Key, partial or full model refresh, and video choices limited to Kling, Seedance 2.0, and MiniMax H3. Either media capability should work without configuring the other.
 - SuperToken image generation/edit and video frame/images/media modes across the image workbench, video workbench, and Canvas, including durable polling recovery, local stop behavior, protected result downloads, and local Blob persistence.
 - Switching among Kling, Seedance, and MiniMax H3 should retain all reference media while resetting resolution, duration, aspect ratio, reference mode, and audio to the new model defaults; resolution uses the lowest account-available SKU and duration uses the shortest supported value.
 - SuperToken browser media upload and real Adobe/Leonardo generation have been verified after enabling the deployed Canvas origins, `PUT`, and `Content-Type` in the target R2 bucket CORS policy.

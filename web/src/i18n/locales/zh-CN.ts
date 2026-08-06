@@ -34,7 +34,7 @@ export default {
         video: { title: "视频设置", quality: "清晰度", size: "尺寸", seconds: "秒数", resolution: "分辨率", ratio: "比例", duration: "时长", smart: "智能", output: "输出", generateAudio: "生成音轨", audioRequired: "生成音轨（模型固定开启）", watermark: "添加水印", adaptive: "自适应", referenceMode: "参考模式", referenceModes: { frame: "首尾帧", images: "多图参考", media: "混合素材" }, frameHint: "第 1 张图为首帧，第 2 张图为尾帧；最多 {{count}} 张。", imagesHint: "普通参考图，可排序，最多 {{count}} 张。", mediaHint: "最多 {{images}} 张图片、{{videos}} 个视频、{{audios}} 个音频，总数 {{total}}。", noResolution: "当前账号没有这个模型可用的分辨率 SKU，请刷新模型。", invalidResolution: "当前分辨率不在账号可用模型中，请重新选择。", invalidDuration: "当前时长不受该模型支持。", invalidRatio: "当前画幅不受该模型支持。", invalidReferenceMode: "当前参考模式不受该模型支持。", sizes: { landscape: "横屏", portrait: "竖屏", square: "方形", widescreen: "宽屏", tall: "长图", auto: "自动" }, ratios: { landscape: "横屏", portrait: "竖屏", square: "方形", standardLandscape: "标准横屏", standardPortrait: "标准竖屏", cinematic: "宽银幕", adaptive: "自适应" } },
         audio: { title: "音频设置", voice: "声音", format: "格式", speed: "语速", instructions: "声音指令", instructionsPlaceholder: "例如：自然、温暖、适合旁白。" },
         text: { title: "文本设置", reasoning: "推理强度" },
-        model: { select: "选择模型", assign: "请先在渠道里为{{capability}}指定模型", noMatch: "暂无匹配的{{capability}}模型", addFirst: "请先到配置里添加渠道和模型", capabilities: { image: "生图", video: "视频", text: "文本", audio: "音频" } },
+        model: { select: "选择模型", configure: "配置渠道", assign: "请先在渠道里为{{capability}}指定模型", noMatch: "暂无匹配的{{capability}}模型", addFirst: "请先到配置里添加渠道和模型", capabilities: { image: "生图", video: "视频", text: "文本", audio: "音频" } },
     },
     generation: { pending: ["正在创建图片", "马上就好了", "再等等", "正在整理细节"] },
     imageReferences: { label: "图片{{index}}", separator: "、", promptPrefix: "参考图片编号：{{labels}}。请按这些编号理解提示词中的图片引用。\n\n{{prompt}}" },

@@ -88,28 +88,12 @@ export const defaultConfig: AiConfig = {
     baseUrl: OPENAI_BASE_URL,
     apiKey: "",
     apiFormat: "openai",
-    channels: [
-        {
-            id: "default",
-            name: i18n.t("config.channels.defaultName"),
-            baseUrl: OPENAI_BASE_URL,
-            apiKey: "",
-            apiFormat: "openai",
-            provider: "custom",
-            models: [
-                { name: "gpt-image-2", capability: "image" },
-                { name: "grok-imagine-video", capability: "video" },
-                { name: "gpt-5.5", capability: "text" },
-                { name: "gpt-4o-mini-tts", capability: "audio" },
-            ],
-        },
-        createSuperTokenChannel(),
-    ],
-    model: "default::gpt-image-2",
-    imageModel: "default::gpt-image-2",
-    videoModel: "default::grok-imagine-video",
-    textModel: "default::gpt-5.5",
-    audioModel: "default::gpt-4o-mini-tts",
+    channels: [],
+    model: "",
+    imageModel: "",
+    videoModel: "",
+    textModel: "",
+    audioModel: "",
     audioVoice: "alloy",
     audioFormat: "mp3",
     audioSpeed: "1",
@@ -121,7 +105,7 @@ export const defaultConfig: AiConfig = {
     videoReferenceMode: "frame",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
+    models: [],
     quality: "auto",
     imageResolution: "1K",
     size: "1:1",
@@ -192,8 +176,11 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
-    if (!capability) return config.models;
-    return config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
+    return config.channels.flatMap((channel) =>
+        channel.models
+            .filter((model) => (!capability || model.capability === capability) && isChannelReadyForCapability(channel, model.capability))
+            .map((model) => encodeChannelModel(channel.id, model.name)),
+    );
 }
 
 /** The user script (if any) attached to a model; empty string means use the system default call. */
@@ -201,14 +188,18 @@ export function resolveModelScript(config: AiConfig, value: string) {
     return findChannelModel(config, value)?.model.script?.trim() || "";
 }
 
-function isAiConfigReady(config: AiConfig, model: string) {
-    const channel = resolveModelChannel(config, model);
+export function isChannelReadyForCapability(channel: ModelChannel, capability: ModelCapability) {
     if (channel.provider === "supertoken") {
-        const capability = modelCapabilityOf(config, model);
+        if (capability !== "image" && capability !== "video") return false;
         const modelKey = capability === "video" ? channel.supertoken?.videoApiKey : channel.supertoken?.imageApiKey;
-        return Boolean(model.trim() && modelKey?.trim() && channel.supertoken?.resourceApiKey.trim());
+        return Boolean(modelKey?.trim() && channel.supertoken?.resourceApiKey.trim());
     }
-    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
+    return Boolean(channel.baseUrl.trim() && channel.apiKey.trim());
+}
+
+function isAiConfigReady(config: AiConfig, model: string) {
+    const matched = findChannelModel(config, model);
+    return Boolean(model.trim() && matched && isChannelReadyForCapability(matched.channel, matched.model.capability));
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -461,18 +452,6 @@ function normalizeChannels(config: AiConfig) {
             supertoken: channel.supertoken,
         }),
     );
-    if (!channels.length) {
-        channels.push(
-            createModelChannel({
-                id: "default",
-                name: i18n.t("config.channels.defaultName"),
-                baseUrl: config.baseUrl || defaultConfig.baseUrl,
-                apiKey: config.apiKey || "",
-                apiFormat: config.apiFormat || defaultConfig.apiFormat,
-                models: normalizeChannelModels([config.model, config.imageModel, config.videoModel, config.textModel, config.audioModel].map(modelOptionName)),
-            }),
-        );
-    }
     return channels;
 }
 
