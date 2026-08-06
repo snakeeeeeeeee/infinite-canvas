@@ -24,6 +24,7 @@ export type SuperTokenChannelConfig = {
     imageModels: string[];
     videoModels: string[];
     syncedAt?: number;
+    authorizedAt?: number;
 };
 
 export type ModelChannel = {
@@ -317,6 +318,7 @@ export function createSuperTokenChannel(channel?: Partial<ModelChannel>): ModelC
         imageModels: uniqueModelOptions(source?.imageModels || []),
         videoModels: uniqueModelOptions(source?.videoModels || []),
         syncedAt: source?.syncedAt,
+        authorizedAt: source?.authorizedAt,
     };
     return {
         id: channel?.id?.trim() || "supertoken",
@@ -360,6 +362,37 @@ export function modelOptionLabel(config: AiConfig, value: string) {
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
     return uniqueModelOptions(channels.flatMap((channel) => channel.models.map((model) => encodeChannelModel(channel.id, model.name))));
+}
+
+export function configWithChannels(config: AiConfig, channels: ModelChannel[], preferredChannelId?: string): AiConfig {
+    const next: AiConfig = {
+        ...config,
+        channels,
+        models: modelOptionsFromChannels(channels),
+        baseUrl: channels[0]?.baseUrl || config.baseUrl,
+        apiKey: channels[0]?.apiKey || config.apiKey,
+        apiFormat: channels[0]?.apiFormat || config.apiFormat,
+    };
+    const imageModel = pickChannelModel(next, "image", config.imageModel, preferredChannelId);
+    const videoModel = pickChannelModel(next, "video", config.videoModel, preferredChannelId);
+    const videoDefaults = videoModel !== config.videoModel ? superTokenVideoConfigPatch(next, videoModel, true) || {} : {};
+    return {
+        ...next,
+        ...videoDefaults,
+        model: imageModel,
+        imageModel,
+        videoModel,
+        textModel: pickChannelModel(next, "text", config.textModel, preferredChannelId),
+        audioModel: pickChannelModel(next, "audio", config.audioModel, preferredChannelId),
+    };
+}
+
+function pickChannelModel(config: AiConfig, capability: ModelCapability, current: string, preferredChannelId?: string) {
+    const options = selectableModelsByCapability(config, capability);
+    const normalized = normalizeModelOptionValue(current, config.channels);
+    if (options.includes(normalized)) return normalized;
+    const preferred = preferredChannelId ? options.find((option) => decodeChannelModel(option)?.channelId === preferredChannelId) : undefined;
+    return preferred || options[0] || "";
 }
 
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {

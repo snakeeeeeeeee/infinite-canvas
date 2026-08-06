@@ -48,6 +48,7 @@ export type CanvasNodeMetadata = {
     videoReferenceMode?: "frame" | "images" | "media";
     asyncTaskId?: string;
     asyncOriginNodeId?: string;
+    asyncResultNodeIds?: string[];
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;

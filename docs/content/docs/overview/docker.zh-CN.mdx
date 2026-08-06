@@ -29,6 +29,26 @@ http://localhost:3000
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
+仓库内的 `docker-compose.local.yml` 默认将 SuperToken/new-api 地址设为 `https://supertoken.cc`。需要连接其他部署时可在启动命令前覆盖：
+
+```bash
+SUPERTOKEN_BASE_URL=https://api.example.com docker compose -f docker-compose.local.yml up -d --build --force-recreate
+```
+
+## SuperToken 地址
+
+主应用镜像支持在容器启动时通过 `SUPERTOKEN_BASE_URL` 指定 SuperToken/new-api 公网地址，无需为不同环境重新构建 Vite 静态文件：
+
+```yaml
+services:
+  app:
+    image: ghcr.io/basketikun/infinite-canvas:latest
+    environment:
+      SUPERTOKEN_BASE_URL: https://supertoken.cc
+```
+
+修改后重新创建容器即可生效。未设置时继续根据渠道区域使用内置的大陆加速或国际站点地址。
+
 ## 文档站镜像
 
 文档站位于 `docs/` 目录，按带服务端能力的 Next.js standalone 应用单独构建，不打进主应用镜像。
@@ -57,9 +77,9 @@ docker compose -f docker-compose.local.yml up -d --build
 
 统计按「每家一个独立变量」配置：**填了谁就启用谁，可同时启用多家**（例如 GA4 + 百度一起开）。仅支持 GA4 与百度，两者都只接受 ID，脚本地址由代码固定拼接，不接受任意脚本地址或内联 JS。
 
-| 变量 | 说明 |
-| --- | --- |
-| `ANALYTICS_GA4_ID` | Google Analytics 4 衡量 ID（`G-XXXX`） |
+| 变量                 | 说明                                      |
+| -------------------- | ----------------------------------------- |
+| `ANALYTICS_GA4_ID`   | Google Analytics 4 衡量 ID（`G-XXXX`）    |
 | `ANALYTICS_BAIDU_ID` | 百度统计站点 ID（`hm.js?` 后面那串 hash） |
 
 在 `docker-compose.yml` 的 `environment` 中配置（文件内已附注释示例），下例同时启用 GA4 与百度：
@@ -87,5 +107,6 @@ docker run -d -p 3000:3000 \
 单页应用的路由切换会自动向所有已启用的统计上报 pageview。
 
 <Callout type="warn">
-请只在你自己的站点上配置统计 ID，不要把 ID 提交进仓库；fork 或自托管本项目的用户默认不会产生任何统计。
+  请只在你自己的站点上配置统计 ID，不要把 ID 提交进仓库；fork
+  或自托管本项目的用户默认不会产生任何统计。
 </Callout>

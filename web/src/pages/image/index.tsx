@@ -15,7 +15,7 @@ import { modelOptionLabel, resolveModelRequestConfig, useConfigStore, useEffecti
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { superTokenImageCapability } from "@/lib/supertoken-capabilities";
+import { canUseSuperTokenNativeImageBatch, superTokenImageCapability } from "@/lib/supertoken-capabilities";
 import { requestEdit, requestGeneration, resumeImageGenerationTask } from "@/services/api/image";
 import { superTokenImageSlotIdempotencyKey, type SuperTokenTaskRecord } from "@/services/api/supertoken";
 import { deleteStoredImages, resolveImageUrl, storeGeneratedImage, uploadImage } from "@/services/image-storage";
@@ -205,7 +205,9 @@ export default function ImagePage() {
             false,
         );
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot, logId, pollingController.signal));
+        const nativeBatch = usesNativeSuperTokenBatch(snapshot.config, generationCount);
+        const batches = nativeBatch ? [{ slot: 0, count: generationCount }] : Array.from({ length: generationCount }, (_, slot) => ({ slot, count: 1 }));
+        const tasks = batches.map((batch) => runGenerationBatch(batch.slot, batch.count, snapshot, logId, pollingController.signal));
 
         const result = await Promise.allSettled(tasks);
         if (pollingController.signal.aborted) {
@@ -220,7 +222,7 @@ export default function ImagePage() {
             setStartedAt(0);
             return;
         }
-        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
+        const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage[]> => item.status === "fulfilled").flatMap((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
         const failed = result.find((item): item is PromiseRejectedResult => item.status === "rejected");
@@ -360,12 +362,17 @@ export default function ImagePage() {
                 log.tasks.map(async ({ slot, task }) => {
                     const itemStartedAt = performance.now();
                     const images = await resumeImageGenerationTask({ ...effectiveConfig, ...log.config, model: log.config.model || log.model }, task, { signal: pollingController.signal });
-                    const image = images[0];
-                    if (!image) throw new Error(t("imageWorkbench.missingResult"));
-                    const stored = await storeGeneratedImage(image);
-                    const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, slot };
-                    setResults((value) => updateResultAt(value, slot, { status: "success", image: nextImage }));
-                    return nextImage;
+                    if (!images.length) throw new Error(t("imageWorkbench.missingResult"));
+                    const batchSize = Number(task.context?.batchSize) || Math.max(1, log.imageCount - slot);
+                    return Promise.all(
+                        images.slice(0, batchSize).map(async (image, index) => {
+                            const imageSlot = slot + index;
+                            const stored = await storeGeneratedImage(image);
+                            const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, slot: imageSlot };
+                            setResults((value) => updateResultAt(value, imageSlot, { status: "success", image: nextImage }));
+                            return nextImage;
+                        }),
+                    );
                 }),
             );
             if (pollingController.signal.aborted) {
@@ -373,7 +380,7 @@ export default function ImagePage() {
                 message.warning(t("workbench.pollingPaused"));
                 return;
             }
-            const images = settled.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value).sort((a, b) => (a.slot || 0) - (b.slot || 0));
+            const images = settled.filter((item): item is PromiseFulfilledResult<GeneratedImage[]> => item.status === "fulfilled").flatMap((item) => item.value).sort((a, b) => (a.slot || 0) - (b.slot || 0));
             const failCount = Math.max(0, log.imageCount - images.length);
             const failed = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
             const error = failed?.reason instanceof Error ? failed.reason.message : failCount ? t("workbench.generationFailed") : undefined;
@@ -424,29 +431,47 @@ export default function ImagePage() {
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }, logId?: string, pollSignal?: AbortSignal) => {
+    const runGenerationBatch = async (startSlot: number, batchSize: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }, logId?: string, pollSignal?: AbortSignal) => {
         const itemStartedAt = performance.now();
         try {
             const options = logId
                 ? {
-                      idempotencyKey: superTokenImageSlotIdempotencyKey(logId, index),
-                      clientReferenceId: `${logId}-${index}`,
-                      context: { target: "image-workbench", logId, slot: index },
+                      idempotencyKey: superTokenImageSlotIdempotencyKey(logId, startSlot),
+                      clientReferenceId: `${logId}-${startSlot}`,
+                      context: { target: "image-workbench", logId, slot: startSlot, batchSize },
                       pollSignal,
-                      onTaskCreated: (task: SuperTokenTaskRecord) => attachTaskToLog(logId, index, task),
+                      onTaskCreated: (task: SuperTokenTaskRecord) => attachTaskToLog(logId, startSlot, task),
                   }
                 : undefined;
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, options) : await requestGeneration(snapshot.config, snapshot.text, options);
-            const image = result[0];
-            if (!image) throw new Error(t("imageWorkbench.missingResult"));
-            const meta = image.width && image.height ? image : await readImageMeta(image.dataUrl);
-            const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, storageKey: image.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width || 0, height: meta.height || 0, bytes: image.bytes ?? getDataUrlByteSize(image.dataUrl), mimeType: image.mimeType, slot: index };
-            setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
-            return nextImage;
+            const requestConfig = { ...snapshot.config, count: String(batchSize) };
+            const result = snapshot.references.length ? await requestEdit(requestConfig, snapshot.text, snapshot.references, undefined, options) : await requestGeneration(requestConfig, snapshot.text, options);
+            if (!result.length) throw new Error(t("imageWorkbench.missingResult"));
+            const images = await Promise.all(
+                result.slice(0, batchSize).map(async (image, index) => {
+                    const slot = startSlot + index;
+                    const meta = image.width && image.height ? image : await readImageMeta(image.dataUrl);
+                    const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, storageKey: image.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width || 0, height: meta.height || 0, bytes: image.bytes ?? getDataUrlByteSize(image.dataUrl), mimeType: image.mimeType, slot };
+                    setResults((value) => updateResultAt(value, slot, { status: "success", image: nextImage }));
+                    return nextImage;
+                }),
+            );
+            for (let slot = startSlot + images.length; slot < startSlot + batchSize; slot += 1) {
+                setResults((value) => updateResultAt(value, slot, { status: "failed", error: t("imageWorkbench.missingResult") }));
+            }
+            return images;
         } catch (error) {
-            if (!isPollingCanceled(error)) setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+            if (!isPollingCanceled(error)) {
+                for (let slot = startSlot; slot < startSlot + batchSize; slot += 1) {
+                    setResults((value) => updateResultAt(value, slot, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+                }
+            }
             throw error;
         }
+    };
+
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }, logId?: string, pollSignal?: AbortSignal) => {
+        const images = await runGenerationBatch(index, 1, snapshot, logId, pollSignal);
+        return images[0];
     };
 
     const stopPolling = () => pollingControllersRef.current.forEach((controller) => controller.abort());
@@ -996,6 +1021,11 @@ function superTokenImageSelectionError(config: AiConfig, model: string, referenc
     if (capability.aspectRatios && !capability.aspectRatios.includes(config.size)) return "当前模型不支持所选图片比例";
     if (requestConfig.model.startsWith("gemini-") && config.background === "transparent") return "当前模型不支持透明背景";
     return "";
+}
+
+function usesNativeSuperTokenBatch(config: AiConfig, count: number) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    return requestConfig.provider === "supertoken" && canUseSuperTokenNativeImageBatch(requestConfig.model, count);
 }
 
 function isPollingCanceled(error: unknown) {

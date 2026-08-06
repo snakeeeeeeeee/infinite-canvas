@@ -10,6 +10,7 @@ import HomePage from "@/pages/home";
 import ImagePage from "@/pages/image";
 import NotFound from "@/pages/not-found";
 import PromptsPage from "@/pages/prompts";
+import SuperTokenAuthCallbackPage from "@/pages/supertoken-auth-callback";
 import VideoPage from "@/pages/video";
 
 export const router = createBrowserRouter([
@@ -31,5 +32,6 @@ export const router = createBrowserRouter([
             { path: "/config", element: <ConfigPage /> },
         ],
     },
+    { path: "/auth/supertoken/callback", element: <SuperTokenAuthCallbackPage /> },
     { path: "*", element: <NotFound /> },
 ]);

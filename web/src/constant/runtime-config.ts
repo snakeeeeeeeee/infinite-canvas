@@ -3,11 +3,12 @@
 // This supports both configuring the same image with docker run -e and injecting values during custom builds.
 //
 // Each analytics provider has its own variable; configured providers are enabled independently and all are disabled by default.
-// Only GA4 and Baidu are supported. Both accept IDs only, and script URLs are assembled in code without arbitrary scripts or inline JavaScript.
+// The SuperToken base URL can also be supplied at container startup without rebuilding the Vite bundle.
 
-type RuntimeConfig = {
+export type RuntimeConfig = {
     ANALYTICS_GA4_ID?: string; // GA4 measurement ID (G-XXXX)
     ANALYTICS_BAIDU_ID?: string; // Baidu Analytics site ID
+    SUPERTOKEN_BASE_URL?: string; // SuperToken/new-api origin
 };
 
 declare global {
@@ -18,12 +19,13 @@ declare global {
 
 const runtime: RuntimeConfig = (typeof window !== "undefined" && window.__RUNTIME_CONFIG__) || {};
 
-function read(key: keyof RuntimeConfig, buildTime: string | undefined, fallback = ""): string {
-    const value = runtime[key];
+export function readRuntimeConfig(key: keyof RuntimeConfig, buildTime: string | undefined, fallback = "", source: RuntimeConfig = runtime): string {
+    const value = source[key];
     if (typeof value === "string" && value.trim()) return value.trim();
     if (typeof buildTime === "string" && buildTime.trim()) return buildTime.trim();
     return fallback;
 }
 
-export const ANALYTICS_GA4_ID = read("ANALYTICS_GA4_ID", import.meta.env.VITE_ANALYTICS_GA4_ID);
-export const ANALYTICS_BAIDU_ID = read("ANALYTICS_BAIDU_ID", import.meta.env.VITE_ANALYTICS_BAIDU_ID);
+export const ANALYTICS_GA4_ID = readRuntimeConfig("ANALYTICS_GA4_ID", import.meta.env.VITE_ANALYTICS_GA4_ID);
+export const ANALYTICS_BAIDU_ID = readRuntimeConfig("ANALYTICS_BAIDU_ID", import.meta.env.VITE_ANALYTICS_BAIDU_ID);
+export const SUPERTOKEN_BASE_URL = readRuntimeConfig("SUPERTOKEN_BASE_URL", import.meta.env.VITE_SUPERTOKEN_BASE_URL);

@@ -381,10 +381,11 @@ function superTokenConfigError(
     return "";
 }
 
-function referenceModeHint(mode: SuperTokenReferenceMode, limits?: { images: number; videos: number; audios: number; total?: number }) {
+function referenceModeHint(mode: SuperTokenReferenceMode, limits?: { images: number; videos: number; audios: number; total?: number; visualTotal?: number }) {
     if (!limits) return "";
     if (mode === "frame") return i18n.t("settingsPanels.video.frameHint", { count: limits.images });
     if (mode === "images") return i18n.t("settingsPanels.video.imagesHint", { count: limits.images });
+    if (limits.visualTotal) return i18n.t("settingsPanels.video.mediaVisualHint", { images: limits.images, videos: limits.videos, visualTotal: limits.visualTotal, audios: limits.audios });
     return i18n.t("settingsPanels.video.mediaHint", { images: limits.images, videos: limits.videos, audios: limits.audios, total: limits.total || limits.images + limits.videos + limits.audios });
 }
 

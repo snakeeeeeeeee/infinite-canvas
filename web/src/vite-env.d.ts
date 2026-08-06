@@ -11,4 +11,6 @@ interface ImportMetaEnv {
     readonly VITE_ANALYTICS_GA4_ID?: string;
     // Baidu Analytics site ID
     readonly VITE_ANALYTICS_BAIDU_ID?: string;
+    // Optional build-time SuperToken/new-api origin. Docker deployments can override it with SUPERTOKEN_BASE_URL at runtime.
+    readonly VITE_SUPERTOKEN_BASE_URL?: string;
 }

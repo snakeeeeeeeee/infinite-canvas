@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+    canUseSuperTokenNativeImageBatch,
     classifySuperTokenVideoModel,
     normalizeSuperTokenReferenceMode,
     normalizeSuperTokenVideoSettings,
+    remainingSuperTokenReferenceCapacity,
     resolveSuperTokenVideoModel,
     superTokenImageCapability,
+    superTokenImageBatchPlan,
     superTokenReferenceImageFields,
     superTokenUnsupportedModels,
     superTokenVideoCapability,
@@ -62,6 +65,21 @@ describe("SuperToken video request capabilities", () => {
         const kling = superTokenVideoCapability("adobe-kling-3.0")!;
         expect(validateSuperTokenVideoSelection({ capability: kling, duration: 6, aspectRatio: "16:9", referenceMode: "images", images: 2, videos: 0, audios: 0, generateAudio: true })).toBe("当前模型不支持所选参考模式");
         expect(validateSuperTokenVideoSelection({ capability: kling, duration: 6, aspectRatio: "16:9", referenceMode: "frame", images: 3, videos: 0, audios: 0, generateAudio: true })).toBe("参考素材数量超过当前模型限制");
+
+        const leonardo = superTokenVideoCapability("leonardo-seedance-2.0")!;
+        expect(validateSuperTokenVideoSelection({ capability: leonardo, duration: 6, aspectRatio: "16:9", referenceMode: "media", images: 4, videos: 3, audios: 1, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability: leonardo, duration: 6, aspectRatio: "16:9", referenceMode: "media", images: 5, videos: 3, audios: 0, generateAudio: true })).toBe("参考素材数量超过当前模型限制");
+    });
+
+    test("calculates remaining capacity from per-type and combined limits", () => {
+        const adobe = superTokenVideoCapability("adobe-seedance-2.0")!.referenceModes.media!;
+        expect(remainingSuperTokenReferenceCapacity("audio", { images: 9, videos: 3, audios: 0 }, adobe)).toBe(0);
+        expect(remainingSuperTokenReferenceCapacity("audio", { images: 8, videos: 2, audios: 0 }, adobe)).toBe(2);
+
+        const leonardo = superTokenVideoCapability("leonardo-seedance-2.0")!.referenceModes.media!;
+        expect(remainingSuperTokenReferenceCapacity("video", { images: 4, videos: 2, audios: 0 }, leonardo)).toBe(1);
+        expect(remainingSuperTokenReferenceCapacity("image", { images: 3, videos: 3, audios: 0 }, leonardo)).toBe(1);
+        expect(remainingSuperTokenReferenceCapacity("audio", { images: 4, videos: 3, audios: 0 }, leonardo)).toBe(1);
     });
 
     test("falls back to each model's default mode without changing supported modes", () => {
@@ -108,5 +126,16 @@ describe("SuperToken image catalog", () => {
         expect(superTokenImageCapability("gemini-3.1-flash-image")?.resolutions).toEqual(["512", "0.5K", "1K", "2K", "4K"]);
         expect(superTokenImageCapability("gemini-3.1-flash-image-preview")).toBeUndefined();
         expect(superTokenUnsupportedModels(["gpt-image-2", "gemini-3.1-flash-image-preview"], ["unknown-video"])).toEqual(["gemini-3.1-flash-image-preview", "unknown-video"]);
+    });
+
+    test("uses explicit per-request output limits instead of model-name suffixes", () => {
+        expect(superTokenImageCapability("gpt-image-2")?.maxOutputsPerRequest).toBe(10);
+        expect(superTokenImageCapability("adobe-gpt-image-2-count")?.maxOutputsPerRequest).toBe(10);
+        expect(superTokenImageCapability("gpt-image-2-count")?.maxOutputsPerRequest).toBe(1);
+        expect(superTokenImageCapability("gemini-3.1-flash-image")?.maxOutputsPerRequest).toBe(1);
+        expect(canUseSuperTokenNativeImageBatch("adobe-gpt-image-2-count", 4)).toBe(true);
+        expect(canUseSuperTokenNativeImageBatch("gpt-image-2-count", 4)).toBe(false);
+        expect(superTokenImageBatchPlan("gpt-image-2", 15)).toEqual([10, 5]);
+        expect(superTokenImageBatchPlan("gpt-image-2-count", 3)).toEqual([1, 1, 1]);
     });
 });

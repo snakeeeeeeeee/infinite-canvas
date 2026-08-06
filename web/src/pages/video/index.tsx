@@ -13,7 +13,7 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_VIDEO_MIME_TYPES } from "@/lib/seedance-video";
-import { normalizeSuperTokenReferenceMode, superTokenVideoCapability, superTokenVideoResolutions, validateSuperTokenVideoSelection, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
+import { normalizeSuperTokenReferenceMode, remainingSuperTokenReferenceCapacity, superTokenVideoCapability, superTokenVideoResolutions, validateSuperTokenVideoSelection, type SuperTokenReferenceLimits, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
@@ -111,6 +111,7 @@ export default function VideoPage() {
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const selectedVideoConfig = buildVideoConfig(effectiveConfig, model);
     const referencePresentation = superTokenReferencePresentation(selectedVideoConfig);
+    const referenceLimits = referencePresentation || SEEDANCE_REFERENCE_LIMITS;
     const currentSelectionError = videoSelectionError(selectedVideoConfig, references, videoReferences, audioReferences);
     const canGenerate = Boolean(prompt.trim()) && !currentSelectionError;
 
@@ -128,9 +129,12 @@ export default function VideoPage() {
         const selectedFiles = Array.from(files || []);
         const unsupported = selectedFiles.filter((file) => !file.type.startsWith("image/") && !SEEDANCE_VIDEO_MIME_TYPES.includes(file.type) && !isSupportedAudioFile(file));
         if (unsupported.length) message.warning(t("videoWorkbench.unsupportedFiles"));
-        const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
-        const videoFiles = selectedFiles.filter((file) => SEEDANCE_VIDEO_MIME_TYPES.includes(file.type) && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
-        const audioFiles = selectedFiles.filter((file) => isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.audios - audioReferences.length);
+        const validFiles = selectedFiles.filter((file) => (file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes) || (SEEDANCE_VIDEO_MIME_TYPES.includes(file.type) && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes) || (isSupportedAudioFile(file) && file.size <= SEEDANCE_REFERENCE_LIMITS.audioMaxBytes));
+        const accepted = acceptReferenceFiles(validFiles, { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, referenceLimits);
+        if (accepted.length < validFiles.length) message.warning(t("videoWorkbench.referenceLimitReached"));
+        const imageFiles = accepted.filter((file) => file.type.startsWith("image/"));
+        const videoFiles = accepted.filter((file) => SEEDANCE_VIDEO_MIME_TYPES.includes(file.type));
+        const audioFiles = accepted.filter(isSupportedAudioFile);
         if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) message.warning(t("videoWorkbench.imageTooLarge"));
         if (selectedFiles.some((file) => SEEDANCE_VIDEO_MIME_TYPES.includes(file.type) && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) message.warning(t("videoWorkbench.videoTooLarge"));
         if (selectedFiles.some((file) => isSupportedAudioFile(file) && file.size > SEEDANCE_REFERENCE_LIMITS.audioMaxBytes)) message.warning(t("videoWorkbench.audioTooLarge"));
@@ -156,9 +160,9 @@ export default function VideoPage() {
             ),
             message.warning,
         );
-        setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
-        setVideoReferences((value) => [...value, ...nextVideoReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
-        setAudioReferences((value) => [...value, ...nextAudioReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.audios));
+        setReferences((value) => [...value, ...nextReferences]);
+        setVideoReferences((value) => [...value, ...nextVideoReferences]);
+        setAudioReferences((value) => [...value, ...nextAudioReferences]);
     };
 
     const handleReferenceDragEnter = (event: DragEvent<HTMLDivElement>, target: "image" | "video" | "audio") => {
@@ -188,14 +192,16 @@ export default function VideoPage() {
                 message.error(t("videoWorkbench.clipboardEmpty"));
                 return;
             }
+            const remaining = remainingSuperTokenReferenceCapacity("image", { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, referenceLimits);
+            if (blobs.length > remaining) message.warning(t("videoWorkbench.referenceLimitReached"));
             const nextReferences = await Promise.all(
-                blobs.slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length).map(async (blob, index) => {
+                blobs.slice(0, remaining).map(async (blob, index) => {
                     const image = await uploadImage(blob);
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
-            setReferences((value) => [...value, ...nextReferences].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
-            message.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
+            setReferences((value) => [...value, ...nextReferences]);
+            if (nextReferences.length) message.success(t("videoWorkbench.clipboardAdded", { count: nextReferences.length }));
         } catch {
             message.error(t("videoWorkbench.clipboardEmpty"));
         }
@@ -308,10 +314,20 @@ export default function VideoPage() {
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
+            if (!remainingSuperTokenReferenceCapacity("image", { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, referenceLimits)) {
+                message.warning(t("videoWorkbench.referenceLimitReached"));
+                setAssetPickerOpen(false);
+                return;
+            }
             const stored = await uploadImage(payload.dataUrl);
-            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
+            setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         } else if (payload.kind === "video") {
-            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height }].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            if (!remainingSuperTokenReferenceCapacity("video", { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, referenceLimits)) {
+                message.warning(t("videoWorkbench.referenceLimitReached"));
+                setAssetPickerOpen(false);
+                return;
+            }
+            setVideoReferences((value) => [...value, { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height }]);
         }
         setAssetPickerOpen(false);
     };
@@ -518,7 +534,7 @@ export default function VideoPage() {
                                               const index = references.length + offset;
                                               return <div key={`frame-slot-${index}`} className="grid size-20 shrink-0 place-items-center rounded-md border border-dashed border-stone-300 text-xs text-stone-500 dark:border-stone-700">{videoImageReferenceLabel("frame", index)}</div>;
                                           })
-                                        : !references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget === "image" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
+                                        : !references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget === "image" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages", { count: referenceLimits.images })}</div> : null}
                                 </div>
                             </div>
 
@@ -549,7 +565,7 @@ export default function VideoPage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget === "video" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noVideos")}</div> : null}
+                                    {!videoReferences.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget === "video" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noVideos", { count: referenceLimits.videos })}</div> : null}
                                 </div>
                             </div>
 
@@ -584,7 +600,7 @@ export default function VideoPage() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!audioReferences.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">{referenceDragTarget === "audio" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noAudio")}</div> : null}
+                                    {!audioReferences.length ? <div className="flex min-w-full items-center justify-center text-center text-sm text-stone-500">{referenceDragTarget === "audio" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noAudio", { count: referenceLimits.audios })}</div> : null}
                                 </div>
                             </div>
 
@@ -885,6 +901,21 @@ function serializeLog(log: GenerationLog): GenerationLog {
 
 function isSupportedAudioFile(file: File) {
     return file.type === "audio/mpeg" || file.type === "audio/mp3" || file.type === "audio/wav" || file.type === "audio/x-wav" || /\.(mp3|wav)$/i.test(file.name);
+}
+
+type ReferenceCounts = { images: number; videos: number; audios: number };
+type ActiveReferenceLimits = Pick<SuperTokenReferenceLimits, "images" | "videos" | "audios" | "total" | "visualTotal">;
+
+function acceptReferenceFiles(files: File[], current: ReferenceCounts, limits: ActiveReferenceLimits) {
+    const counts = { ...current };
+    return files.filter((file) => {
+        const kind = file.type.startsWith("image/") ? "image" : SEEDANCE_VIDEO_MIME_TYPES.includes(file.type) ? "video" : "audio";
+        if (!remainingSuperTokenReferenceCapacity(kind, counts, limits)) return false;
+        if (kind === "image") counts.images += 1;
+        else if (kind === "video") counts.videos += 1;
+        else counts.audios += 1;
+        return true;
+    });
 }
 
 function filterAudioReferencesByDuration(existing: ReferenceAudio[], next: ReferenceAudio[], warn: (content: string) => void) {

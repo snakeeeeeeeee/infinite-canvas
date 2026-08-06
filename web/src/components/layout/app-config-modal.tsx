@@ -12,7 +12,7 @@ import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, createSuperTokenChannel, modelOptionsFromChannels, normalizeModelOptionValue, selectableModelsByCapability, superTokenVideoConfigPatch, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { configWithChannels, createModelChannel, createSuperTokenChannel, selectableModelsByCapability, superTokenVideoConfigPatch, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -91,7 +91,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         }
     };
 
-    const updateChannels = (channels: ModelChannel[]) => saveConfig(withChannels(config, channels));
+    const updateChannels = (channels: ModelChannel[], preferredChannelId?: string) => saveConfig(configWithChannels(config, channels, preferredChannelId));
 
     const addChannel = (provider: "custom" | "supertoken") => {
         if (provider === "supertoken") {
@@ -110,8 +110,8 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
         updateChannels(config.channels.filter((channel) => channel.id !== id));
     };
 
-    const saveChannel = (channel: ModelChannel) => {
-        updateChannels(config.channels.map((item) => (item.id === channel.id ? channel : item)));
+    const saveChannel = (channel: ModelChannel, preferModels = false) => {
+        updateChannels(config.channels.map((item) => (item.id === channel.id ? channel : item)), preferModels ? channel.id : undefined);
     };
 
     const testWebdav = async () => {
@@ -360,35 +360,6 @@ export function AppConfigModal() {
             <AppConfigPanel showDoneButton initialTab={configTab} />
         </Modal>
     );
-}
-
-function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
-    const next: AiConfig = {
-        ...config,
-        channels,
-        models: modelOptionsFromChannels(channels),
-        baseUrl: channels[0]?.baseUrl || config.baseUrl,
-        apiKey: channels[0]?.apiKey || config.apiKey,
-        apiFormat: channels[0]?.apiFormat || config.apiFormat,
-    };
-    const imageModel = pickDefaultModel(next, "image", config.imageModel);
-    const videoModel = pickDefaultModel(next, "video", config.videoModel);
-    const videoDefaults = videoModel !== config.videoModel ? superTokenVideoConfigPatch(next, videoModel, true) || {} : {};
-    return {
-        ...next,
-        ...videoDefaults,
-        model: imageModel,
-        imageModel,
-        videoModel,
-        textModel: pickDefaultModel(next, "text", config.textModel),
-        audioModel: pickDefaultModel(next, "audio", config.audioModel),
-    };
-}
-
-function pickDefaultModel(config: AiConfig, capability: ModelCapability, current: string) {
-    const options = selectableModelsByCapability(config, capability);
-    const normalized = normalizeModelOptionValue(current, config.channels);
-    return options.includes(normalized) ? normalized : options[0] || "";
 }
 
 function normalizeImageCount(value: string) {

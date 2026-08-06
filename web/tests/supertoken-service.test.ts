@@ -38,6 +38,12 @@ describe("SuperToken request mapping", () => {
         ).toEqual({ count: 1, format: "png", aspect_ratio: "16:9", resolution: "2K", quality: "auto" });
     });
 
+    test("maps native multi-image counts only for models that support them", () => {
+        expect(buildSuperTokenImageOutput("gpt-image-2", { prompt: "test", references: [], count: 6 })).toEqual({ count: 6, format: "png" });
+        expect(buildSuperTokenImageOutput("adobe-gpt-image-2-count", { prompt: "test", references: [], count: 4 })).toEqual({ count: 4, format: "png" });
+        expect(buildSuperTokenImageOutput("gpt-image-2-count", { prompt: "test", references: [], count: 4 })).toEqual({ count: 1, format: "png" });
+    });
+
     test("assigns globally unique ordered names to Seedance media references", () => {
         const payload = buildSuperTokenVideoPayload({
             model: "leonardo-seedance-2.0-fast-480p",

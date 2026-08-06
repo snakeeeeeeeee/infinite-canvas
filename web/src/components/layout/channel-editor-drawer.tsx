@@ -1,23 +1,25 @@
 import { App, Button, Drawer, Input, Segmented, Select, Space, Tag } from "antd";
-import { Image, KeyRound, ListPlus, RefreshCw, Trash2, Video } from "lucide-react";
+import { ChevronDown, Image, KeyRound, Link2, ListPlus, RefreshCw, ShieldCheck, Trash2, Video } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { superTokenBaseUrl, superTokenUnsupportedModels } from "@/lib/supertoken-capabilities";
 import { fetchSuperTokenModels, testSuperTokenResourceKey } from "@/services/api/supertoken";
+import { authorizedSuperTokenChannel, authorizeSuperToken, SuperTokenAuthorizationError } from "@/services/api/supertoken-authorization";
 import { createModelChannel, createSuperTokenChannel, defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel, type SuperTokenChannelConfig } from "@/stores/use-config-store";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
 type ScriptTarget = { name: string; capability: ModelCapability; value: string };
 
-export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: boolean; channel: ModelChannel | null; onSave: (channel: ModelChannel) => void; onClose: () => void }) {
+export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: boolean; channel: ModelChannel | null; onSave: (channel: ModelChannel, preferModels?: boolean) => void; onClose: () => void }) {
     const { message } = App.useApp();
     const { t } = useTranslation();
     const [draft, setDraft] = useState<ModelChannel | null>(channel);
     const [selectOpen, setSelectOpen] = useState(false);
     const [scriptTarget, setScriptTarget] = useState<ScriptTarget | null>(null);
     const [checking, setChecking] = useState<"image" | "video" | "resource" | "all" | "">("");
+    const [authorizing, setAuthorizing] = useState(false);
     const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
@@ -34,6 +36,8 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const patch = (value: Partial<ModelChannel>) => setDraft((current) => (current ? { ...current, ...value } : current));
     const isSuperToken = draft.provider === "supertoken";
     const resourceKeyMissing = isSuperToken && !draft.supertoken?.resourceApiKey.trim();
+    const moduleKeyMissing = isSuperToken && !draft.supertoken?.imageApiKey.trim() && !draft.supertoken?.videoApiKey.trim();
+    const superTokenManualInvalid = resourceKeyMissing || moduleKeyMissing;
     const setModels = (models: ChannelModel[]) => patch({ models });
 
     const changeApiFormat = (apiFormat: ApiCallFormat) => {
@@ -115,9 +119,27 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         }
     };
 
+    const authorize = async () => {
+        setAuthorizing(true);
+        try {
+            const settings = draft.supertoken!;
+            const result = await authorizeSuperToken(settings.region);
+            const next = authorizedSuperTokenChannel(draft, settings.region, result);
+            setDraft(next);
+            onSave(next, true);
+            message.success(t("config.superToken.authorizationSuccess"));
+        } catch (error) {
+            const description = error instanceof Error ? error.message : t("config.superToken.authorizationFailed");
+            if (error instanceof SuperTokenAuthorizationError && error.code === "access_denied") message.info(description);
+            else message.error(description);
+        } finally {
+            setAuthorizing(false);
+        }
+    };
+
     const save = () => {
-        if (resourceKeyMissing) {
-            message.error(t("config.superToken.resourceKeyRequired"));
+        if (superTokenManualInvalid) {
+            message.error(t(resourceKeyMissing ? "config.superToken.resourceKeyRequired" : "config.superToken.moduleKeyRequired"));
             return;
         }
         onSave(isSuperToken ? createSuperTokenChannel({ ...draft, name: draft.name.trim() || "SuperToken" }) : { ...draft, name: draft.name.trim() || t("config.channels.unnamed"), models: normalizeChannelModels(draft.models) });
@@ -134,7 +156,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
             extra={
                 <Space>
                     <Button onClick={onClose}>{t("common.cancel")}</Button>
-                    <Button type="primary" disabled={resourceKeyMissing} onClick={save}>
+                    <Button type="primary" disabled={superTokenManualInvalid} onClick={save}>
                         {t("common.save")}
                     </Button>
                 </Space>
@@ -155,7 +177,9 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                 <SuperTokenEditor
                     draft={draft}
                     checking={checking}
+                    authorizing={authorizing}
                     onPatch={patchSuperToken}
+                    onAuthorize={authorize}
                     onTestModels={testModels}
                     onTestResource={testResource}
                     onRefreshAll={refreshAll}
@@ -226,14 +250,18 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
 function SuperTokenEditor({
     draft,
     checking,
+    authorizing,
     onPatch,
+    onAuthorize,
     onTestModels,
     onTestResource,
     onRefreshAll,
 }: {
     draft: ModelChannel;
     checking: "image" | "video" | "resource" | "all" | "";
+    authorizing: boolean;
     onPatch: (value: Partial<SuperTokenChannelConfig>) => void;
+    onAuthorize: () => void;
     onTestModels: (kind: "image" | "video") => void;
     onTestResource: () => void;
     onRefreshAll: () => void;
@@ -241,6 +269,7 @@ function SuperTokenEditor({
     const { t } = useTranslation();
     const settings = draft.supertoken!;
     const unsupported = superTokenUnsupportedModels(settings.imageModels, settings.videoModels);
+    const moduleKeyMissing = !settings.imageApiKey.trim() && !settings.videoApiKey.trim();
     const changeRegion = (region: SuperTokenChannelConfig["region"]) => onPatch({ region, imageModels: [], videoModels: [], syncedAt: undefined });
     return (
         <div className="mt-5 space-y-5">
@@ -257,50 +286,71 @@ function SuperTokenEditor({
                 />
                 <div className="mt-1.5 text-xs text-stone-500">{superTokenBaseUrl(settings.region)}</div>
             </div>
-            <KeyField
-                icon={<Image className="size-4" />}
-                label={t("config.superToken.imageKey")}
-                value={settings.imageApiKey}
-                placeholder="sk-..."
-                loading={checking === "image"}
-                onChange={(imageApiKey) => onPatch({ imageApiKey, imageModels: [], syncedAt: undefined })}
-                onTest={() => onTestModels("image")}
-            />
-            <KeyField
-                icon={<Video className="size-4" />}
-                label={t("config.superToken.videoKey")}
-                value={settings.videoApiKey}
-                placeholder="sk-..."
-                loading={checking === "video"}
-                onChange={(videoApiKey) => onPatch({ videoApiKey, videoModels: [], syncedAt: undefined })}
-                onTest={() => onTestModels("video")}
-            />
-            <KeyField
-                icon={<KeyRound className="size-4" />}
-                label={t("config.superToken.resourceKey")}
-                value={settings.resourceApiKey}
-                placeholder="ak_..."
-                loading={checking === "resource"}
-                required
-                error={t("config.superToken.resourceKeyRequired")}
-                onChange={(resourceApiKey) => onPatch({ resourceApiKey })}
-                onTest={onTestResource}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 pt-4 dark:border-stone-800">
-                <div className="flex flex-wrap gap-2">
-                    <Tag className="m-0">{t("config.superToken.imageModels", { count: settings.imageModels.length })}</Tag>
-                    <Tag className="m-0">{t("config.superToken.videoModels", { count: settings.videoModels.length })}</Tag>
-                    {unsupported.length ? <Tag className="m-0" color="warning">{t("config.superToken.unsupported", { count: unsupported.length })}</Tag> : null}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-y border-stone-200 py-4 dark:border-stone-800">
+                <div className="flex min-w-0 items-center gap-3">
+                    <ShieldCheck className={settings.authorizedAt ? "size-5 shrink-0 text-emerald-600 dark:text-emerald-400" : "size-5 shrink-0 text-stone-400"} />
+                    <div className="min-w-0">
+                        <div className="text-sm font-medium">{t(settings.authorizedAt ? "config.superToken.connected" : "config.superToken.notConnected")}</div>
+                        {settings.authorizedAt ? <div className="mt-0.5 truncate text-xs text-stone-500">{t("config.superToken.connectedAt", { time: new Date(settings.authorizedAt).toLocaleString() })}</div> : null}
+                    </div>
                 </div>
-                <Button icon={<RefreshCw className="size-4" />} loading={checking === "all"} onClick={onRefreshAll}>
-                    {t("config.superToken.refreshAll")}
+                <Button type="primary" icon={<Link2 className="size-4" />} loading={authorizing} onClick={onAuthorize}>
+                    {t(settings.authorizedAt ? "config.superToken.reauthorize" : "config.superToken.connect")}
                 </Button>
             </div>
-            {unsupported.length ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-                    {t("config.superToken.unsupportedHint")}：{unsupported.join("、")}
+            <details className="group">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-1 text-sm font-medium marker:content-none">
+                    <span>{t("config.superToken.advanced")}</span>
+                    <ChevronDown className="size-4 text-stone-500 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="mt-4 space-y-5">
+                    {moduleKeyMissing ? <div className="text-xs text-red-500 dark:text-red-400">{t("config.superToken.moduleKeyRequired")}</div> : null}
+                    <KeyField
+                        icon={<Image className="size-4" />}
+                        label={t("config.superToken.imageKey")}
+                        value={settings.imageApiKey}
+                        placeholder="sk-..."
+                        loading={checking === "image"}
+                        onChange={(imageApiKey) => onPatch({ imageApiKey, imageModels: [], syncedAt: undefined, authorizedAt: undefined })}
+                        onTest={() => onTestModels("image")}
+                    />
+                    <KeyField
+                        icon={<Video className="size-4" />}
+                        label={t("config.superToken.videoKey")}
+                        value={settings.videoApiKey}
+                        placeholder="sk-..."
+                        loading={checking === "video"}
+                        onChange={(videoApiKey) => onPatch({ videoApiKey, videoModels: [], syncedAt: undefined, authorizedAt: undefined })}
+                        onTest={() => onTestModels("video")}
+                    />
+                    <KeyField
+                        icon={<KeyRound className="size-4" />}
+                        label={t("config.superToken.resourceKey")}
+                        value={settings.resourceApiKey}
+                        placeholder="ak_..."
+                        loading={checking === "resource"}
+                        required
+                        error={t("config.superToken.resourceKeyRequired")}
+                        onChange={(resourceApiKey) => onPatch({ resourceApiKey, authorizedAt: undefined })}
+                        onTest={onTestResource}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 pt-4 dark:border-stone-800">
+                        <div className="flex flex-wrap gap-2">
+                            <Tag className="m-0">{t("config.superToken.imageModels", { count: settings.imageModels.length })}</Tag>
+                            <Tag className="m-0">{t("config.superToken.videoModels", { count: settings.videoModels.length })}</Tag>
+                            {unsupported.length ? <Tag className="m-0" color="warning">{t("config.superToken.unsupported", { count: unsupported.length })}</Tag> : null}
+                        </div>
+                        <Button icon={<RefreshCw className="size-4" />} loading={checking === "all"} onClick={onRefreshAll}>
+                            {t("config.superToken.refreshAll")}
+                        </Button>
+                    </div>
+                    {unsupported.length ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                            {t("config.superToken.unsupportedHint")}：{unsupported.join("、")}
+                        </div>
+                    ) : null}
                 </div>
-            ) : null}
+            </details>
         </div>
     );
 }

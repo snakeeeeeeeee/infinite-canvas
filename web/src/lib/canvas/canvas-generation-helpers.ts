@@ -116,7 +116,8 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     const durableBatchRoots = new Set(nodes.filter((node) => node.metadata?.asyncTaskId && node.metadata.batchRootId).map((node) => node.metadata!.batchRootId!));
     const durableOrigins = new Set(nodes.filter((node) => node.metadata?.asyncTaskId && node.metadata.asyncOriginNodeId).map((node) => node.metadata!.asyncOriginNodeId!));
-    return nodes.map((node) => (node.metadata?.status === "loading" && !node.metadata.asyncTaskId && !durableBatchRoots.has(node.id) && !durableOrigins.has(node.id) ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted") } } : node));
+    const durableResults = new Set(nodes.flatMap((node) => (node.metadata?.asyncTaskId ? node.metadata.asyncResultNodeIds || [] : [])));
+    return nodes.map((node) => (node.metadata?.status === "loading" && !node.metadata.asyncTaskId && !durableBatchRoots.has(node.id) && !durableOrigins.has(node.id) && !durableResults.has(node.id) ? { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted") } } : node));
 }
 
 export function isGenerationCanceled(error: unknown) {

@@ -7,6 +7,7 @@ import { requestSuperTokenImages, resumeSuperTokenImageTask, type SuperTokenTask
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { superTokenImageBatchPlan } from "@/lib/supertoken-capabilities";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -752,14 +753,12 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         const size = requestConfig.model.startsWith("gemini-") ? config.size : resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
         try {
-            const requests = Array.from({ length: n }, (_, index) =>
-                requestSuperTokenImages(
-                    requestConfig,
-                    { prompt: withSystemPrompt(requestConfig, prompt), references: [], size, quality: config.quality, resolution: config.imageResolution, background },
-                    { ...options, context: { ...options?.context, slot: index } },
-                ),
+            return await requestSuperTokenImageBatches(
+                requestConfig,
+                { prompt: withSystemPrompt(requestConfig, prompt), references: [], size, quality: config.quality, resolution: config.imageResolution, background },
+                n,
+                options,
             );
-            return (await Promise.all(requests)).flat();
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
@@ -829,14 +828,12 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const size = requestConfig.model.startsWith("gemini-") ? config.size : resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
         try {
-            const requests = Array.from({ length: n }, (_, index) =>
-                requestSuperTokenImages(
-                    requestConfig,
-                    { prompt: withSystemPrompt(requestConfig, requestPrompt), references, mask, size, quality: config.quality, resolution: config.imageResolution, background },
-                    { ...options, context: { ...options?.context, slot: index } },
-                ),
+            return await requestSuperTokenImageBatches(
+                requestConfig,
+                { prompt: withSystemPrompt(requestConfig, requestPrompt), references, mask, size, quality: config.quality, resolution: config.imageResolution, background },
+                n,
+                options,
             );
-            return (await Promise.all(requests)).flat();
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
@@ -910,6 +907,30 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
+}
+
+async function requestSuperTokenImageBatches(
+    config: Parameters<typeof requestSuperTokenImages>[0],
+    request: Parameters<typeof requestSuperTokenImages>[1],
+    count: number,
+    options?: RequestOptions,
+) {
+    const plan = superTokenImageBatchPlan(config.model, count);
+    let offset = 0;
+    const requests = plan.map((batchSize) => {
+        const slot = Number(options?.context?.slot) || 0;
+        const batchOffset = offset;
+        offset += batchSize;
+        const derivedOptions = plan.length === 1
+            ? options
+            : {
+                  ...options,
+                  idempotencyKey: options?.idempotencyKey ? `${options.idempotencyKey}-${batchOffset}` : undefined,
+                  clientReferenceId: options?.clientReferenceId ? `${options.clientReferenceId}-${batchOffset}` : undefined,
+              };
+        return requestSuperTokenImages(config, { ...request, count: batchSize }, { ...derivedOptions, context: { ...options?.context, slot: slot + batchOffset, batchSize } });
+    });
+    return (await Promise.all(requests)).flat();
 }
 
 export async function resumeImageGenerationTask(config: AiConfig, task: SuperTokenTaskRecord, options?: RequestOptions): Promise<GeneratedImageResult[]> {

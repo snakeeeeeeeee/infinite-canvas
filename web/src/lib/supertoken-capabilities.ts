@@ -1,3 +1,5 @@
+import { SUPERTOKEN_BASE_URL } from "@/constant/runtime-config";
+
 export type SuperTokenRegion = "cn" | "global";
 export type SuperTokenReferenceMode = "frame" | "images" | "media";
 export type SuperTokenAudioPolicy = "optional" | "required" | "unsupported";
@@ -7,6 +9,7 @@ export type SuperTokenReferenceLimits = {
     videos: number;
     audios: number;
     total?: number;
+    visualTotal?: number;
     minImages?: number;
     minVideos?: number;
     minAudios?: number;
@@ -39,7 +42,7 @@ export type SuperTokenImageCapability = {
     label: string;
     operations: Array<"generation" | "edit">;
     maxImages: number;
-    count: number;
+    maxOutputsPerRequest: number;
     qualities: string[];
     formats: string[];
     aspectRatios?: string[];
@@ -88,7 +91,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         provider: "Leonardo",
         duration: { min: 4, max: 15 },
         aspectRatios: SIX_VIDEO_RATIOS,
-        referenceModes: { media: { images: 4, videos: 3, audios: 1, audioRequiresVisual: true } },
+        referenceModes: { media: { images: 4, videos: 3, audios: 1, visualTotal: 7, audioRequiresVisual: true } },
         defaultReferenceMode: "media",
         audioPolicy: "optional",
     },
@@ -98,7 +101,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         provider: "Leonardo",
         duration: { min: 4, max: 15 },
         aspectRatios: SIX_VIDEO_RATIOS,
-        referenceModes: { media: { images: 4, videos: 3, audios: 1, audioRequiresVisual: true } },
+        referenceModes: { media: { images: 4, videos: 3, audios: 1, visualTotal: 7, audioRequiresVisual: true } },
         defaultReferenceMode: "media",
         audioPolicy: "optional",
     },
@@ -143,14 +146,38 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
 ];
 
 export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
-    { model: "gpt-image-2", label: "GPT Image 2", operations: ["generation", "edit"], maxImages: 10, count: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "gpt-image-2-count", label: "GPT Image 2 Count", operations: ["generation", "edit"], maxImages: 10, count: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "adobe-gpt-image-2-count", label: "GPT Image 2 Count", operations: ["generation", "edit"], maxImages: 10, count: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image", operations: ["generation", "edit"], maxImages: 10, count: 1, qualities: ["auto"], formats: ["png"], aspectRatios: GEMINI_IMAGE_RATIOS, resolutions: ["512", "0.5K", "1K", "2K", "4K"], mask: false },
-    { model: "gemini-3-pro-image-count", label: "Gemini 3 Pro Image Count", operations: ["generation", "edit"], maxImages: 10, count: 1, qualities: ["auto"], formats: ["png"], aspectRatios: GEMINI_IMAGE_RATIOS, resolutions: ["1K", "2K", "4K"], mask: false },
+    { model: "gpt-image-2", label: "GPT Image 2", operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    { model: "gpt-image-2-count", label: "GPT Image 2 Count", operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    { model: "adobe-gpt-image-2-count", label: "GPT Image 2 Count", operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    {
+        model: "gemini-3.1-flash-image",
+        label: "Gemini 3.1 Flash Image",
+        operations: ["generation", "edit"],
+        maxImages: 10,
+        maxOutputsPerRequest: 1,
+        qualities: ["auto"],
+        formats: ["png"],
+        aspectRatios: GEMINI_IMAGE_RATIOS,
+        resolutions: ["512", "0.5K", "1K", "2K", "4K"],
+        mask: false,
+    },
+    {
+        model: "gemini-3-pro-image-count",
+        label: "Gemini 3 Pro Image Count",
+        operations: ["generation", "edit"],
+        maxImages: 10,
+        maxOutputsPerRequest: 1,
+        qualities: ["auto"],
+        formats: ["png"],
+        aspectRatios: GEMINI_IMAGE_RATIOS,
+        resolutions: ["1K", "2K", "4K"],
+        mask: false,
+    },
 ];
 
 export function superTokenBaseUrl(region: SuperTokenRegion | undefined) {
+    const override = SUPERTOKEN_BASE_URL.trim().replace(/\/+$/, "");
+    if (override) return override;
     return SUPERTOKEN_BASE_URLS[region || "cn"];
 }
 
@@ -160,6 +187,26 @@ export function superTokenVideoCapability(family: string) {
 
 export function superTokenImageCapability(model: string) {
     return SUPERTOKEN_IMAGE_CAPABILITIES.find((item) => item.model === model);
+}
+
+export function canUseSuperTokenNativeImageBatch(model: string, count: number) {
+    const max = superTokenImageCapability(model)?.maxOutputsPerRequest || 1;
+    return count > 1 && count <= max;
+}
+
+export function superTokenImageBatchPlan(model: string, count: number) {
+    const total = Math.max(1, Math.floor(count) || 1);
+    const max = superTokenImageCapability(model)?.maxOutputsPerRequest || 1;
+    const batches: number[] = [];
+    for (let remaining = total; remaining > 0; remaining -= max) batches.push(Math.min(remaining, max));
+    return batches;
+}
+
+export function remainingSuperTokenReferenceCapacity(kind: "image" | "video" | "audio", counts: { images: number; videos: number; audios: number }, limits: Pick<SuperTokenReferenceLimits, "images" | "videos" | "audios" | "total" | "visualTotal">) {
+    const perKind = kind === "image" ? limits.images - counts.images : kind === "video" ? limits.videos - counts.videos : limits.audios - counts.audios;
+    const total = limits.total ? limits.total - counts.images - counts.videos - counts.audios : Number.POSITIVE_INFINITY;
+    const visual = kind !== "audio" && limits.visualTotal ? limits.visualTotal - counts.images - counts.videos : Number.POSITIVE_INFINITY;
+    return Math.max(0, Math.min(perKind, total, visual));
 }
 
 export function superTokenModelLabel(model: string) {
@@ -211,17 +258,11 @@ export function resolveSuperTokenVideoModel(family: string, resolution: string, 
 
 export function superTokenSelectableModels(imageModelIds: string[], videoModelIds: string[]) {
     const supportedImages = imageModelIds.filter((model) => Boolean(superTokenImageCapability(model)));
-    return [
-        ...supportedImages.map((name) => ({ name, capability: "image" as const })),
-        ...superTokenVideoFamilies(videoModelIds).map((name) => ({ name, capability: "video" as const })),
-    ];
+    return [...supportedImages.map((name) => ({ name, capability: "image" as const })), ...superTokenVideoFamilies(videoModelIds).map((name) => ({ name, capability: "video" as const }))];
 }
 
 export function superTokenUnsupportedModels(imageModelIds: string[], videoModelIds: string[]) {
-    return [
-        ...imageModelIds.filter((model) => !superTokenImageCapability(model)),
-        ...videoModelIds.filter((model) => !classifySuperTokenVideoModel(model) && !isExcludedSuperTokenVideoModel(model)),
-    ];
+    return [...imageModelIds.filter((model) => !superTokenImageCapability(model)), ...videoModelIds.filter((model) => !classifySuperTokenVideoModel(model) && !isExcludedSuperTokenVideoModel(model))];
 }
 
 export function defaultSuperTokenReferenceMode(capability: SuperTokenVideoCapability | undefined) {
@@ -234,12 +275,7 @@ export function normalizeSuperTokenReferenceMode(capability: SuperTokenVideoCapa
     return defaultSuperTokenReferenceMode(capability);
 }
 
-export function normalizeSuperTokenVideoSettings(
-    capability: SuperTokenVideoCapability,
-    resolutions: string[],
-    current: Partial<SuperTokenVideoSettings>,
-    reset = false,
-): SuperTokenVideoSettings {
+export function normalizeSuperTokenVideoSettings(capability: SuperTokenVideoCapability, resolutions: string[], current: Partial<SuperTokenVideoSettings>, reset = false): SuperTokenVideoSettings {
     const normalizedResolutions = resolutions.map((value) => `${value.replace(/p$/i, "")}p`.toLowerCase());
     const defaultResolution = capability.fixedResolution || lowestVideoResolution(normalizedResolutions) || normalizeVideoResolution(current.resolution);
     const currentResolution = normalizeVideoResolution(current.resolution);
@@ -251,7 +287,7 @@ export function normalizeSuperTokenVideoSettings(
     const defaultReferenceMode = defaultSuperTokenReferenceMode(capability);
     const currentReferenceMode = normalizeSuperTokenReferenceMode(capability, current.referenceMode);
     const defaultGenerateAudio = capability.audioPolicy !== "unsupported";
-    const currentGenerateAudio = capability.audioPolicy === "required" ? true : capability.audioPolicy === "unsupported" ? false : current.generateAudio ?? true;
+    const currentGenerateAudio = capability.audioPolicy === "required" ? true : capability.audioPolicy === "unsupported" ? false : (current.generateAudio ?? true);
     const referenceModeSupported = Boolean(current.referenceMode && capability.referenceModes[current.referenceMode]);
     const audioSettingSupported = capability.audioPolicy === "optional" || current.generateAudio === defaultGenerateAudio;
     const useDefaults = reset || !normalizedResolutions.includes(currentResolution) || !capability.aspectRatios.includes(currentAspectRatio) || !durationSupported || !referenceModeSupported || !audioSettingSupported;
@@ -297,22 +333,13 @@ export function superTokenReferenceImageFields<T>(capability: SuperTokenVideoCap
     };
 }
 
-export function validateSuperTokenVideoSelection(params: {
-    capability: SuperTokenVideoCapability;
-    duration: number;
-    aspectRatio: string;
-    referenceMode: SuperTokenReferenceMode;
-    images: number;
-    videos: number;
-    audios: number;
-    generateAudio: boolean;
-}) {
+export function validateSuperTokenVideoSelection(params: { capability: SuperTokenVideoCapability; duration: number; aspectRatio: string; referenceMode: SuperTokenReferenceMode; images: number; videos: number; audios: number; generateAudio: boolean }) {
     const { capability, duration, aspectRatio, referenceMode, images, videos, audios, generateAudio } = params;
     if (capability.duration.values ? !capability.duration.values.includes(duration) : duration < capability.duration.min || duration > capability.duration.max) return "当前模型不支持所选时长";
     if (!capability.aspectRatios.includes(aspectRatio)) return "当前模型不支持所选画幅";
     const limits = capability.referenceModes[referenceMode];
     if (!limits) return "当前模型不支持所选参考模式";
-    if (images > limits.images || videos > limits.videos || audios > limits.audios || (limits.total && images + videos + audios > limits.total)) return "参考素材数量超过当前模型限制";
+    if (images > limits.images || videos > limits.videos || audios > limits.audios || (limits.total && images + videos + audios > limits.total) || (limits.visualTotal && images + videos > limits.visualTotal)) return "参考素材数量超过当前模型限制";
     const hasReferences = images + videos + audios > 0;
     if (hasReferences && (images < (limits.minImages || 0) || videos < (limits.minVideos || 0) || audios < (limits.minAudios || 0))) return "当前参考模式缺少必需素材";
     if (limits.audioRequiresVisual && audios && !images && !videos) return "参考音频必须搭配图片或视频";

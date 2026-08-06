@@ -23,6 +23,22 @@ docker compose -f docker-compose.local.yml up -d --build
 
 The local source build maps host port `10001` by default. Open `http://localhost:10001`; the container still listens on port `3000`.
 
+The checked-in `docker-compose.local.yml` defaults the SuperToken/new-api origin to `https://supertoken.cc`. Override it for another deployment by prefixing the command with `SUPERTOKEN_BASE_URL=https://api.example.com`.
+
+## SuperToken origin
+
+Set `SUPERTOKEN_BASE_URL` at container startup to point the application at a specific SuperToken/new-api deployment. The same image can be reused without rebuilding the Vite bundle:
+
+```yaml
+services:
+  app:
+    image: ghcr.io/basketikun/infinite-canvas:latest
+    environment:
+      SUPERTOKEN_BASE_URL: https://supertoken.cc
+```
+
+Recreate the container after changing the value. When it is unset, the selected provider region continues to use the built-in mainland or global origin.
+
 ## Documentation image
 
 The documentation in `docs/` is a separate Next.js standalone application with server capabilities.
@@ -45,10 +61,10 @@ The main application container only runs Next.js. Canvases, My Assets, generatio
 
 No analytics are enabled by default. A deployment can enable GA4, Baidu Analytics, or both at runtime:
 
-| Variable | Description |
-| --- | --- |
-| `ANALYTICS_GA4_ID` | Google Analytics 4 measurement ID (`G-XXXX`) |
-| `ANALYTICS_BAIDU_ID` | Baidu site ID, the hash after `hm.js?` |
+| Variable             | Description                                  |
+| -------------------- | -------------------------------------------- |
+| `ANALYTICS_GA4_ID`   | Google Analytics 4 measurement ID (`G-XXXX`) |
+| `ANALYTICS_BAIDU_ID` | Baidu site ID, the hash after `hm.js?`       |
 
 ```yaml
 services:

@@ -82,6 +82,7 @@ type ImageRequest = {
     quality?: string;
     resolution?: string;
     background?: string;
+    count?: number;
 };
 
 export type MediaUploadInput = { clientId: string; kind: "image" | "video" | "audio"; name: string; type: string; blob: Blob };
@@ -114,6 +115,8 @@ export async function requestSuperTokenImages(config: SuperTokenRequestConfig, r
     if (request.mask && !capability.mask) throw new Error("当前模型不支持蒙版编辑");
     if (config.model.startsWith("gemini-") && request.background === "transparent") throw new Error("当前模型不支持透明背景");
     if (request.references.length > capability.maxImages) throw new Error(`当前模型最多支持 ${capability.maxImages} 张参考图`);
+    const count = Math.max(1, Math.floor(request.count || 1));
+    if (count > capability.maxOutputsPerRequest) throw new Error(`当前模型单次最多生成 ${capability.maxOutputsPerRequest} 张图片`);
     if (request.quality && !capability.qualities.includes(request.quality)) throw new Error("当前模型不支持所选图片质量");
     if (capability.aspectRatios && request.size && !capability.aspectRatios.includes(request.size)) throw new Error("当前模型不支持所选图片比例");
     if (capability.resolutions && request.resolution && !capability.resolutions.includes(request.resolution)) throw new Error("当前模型不支持所选图片分辨率");
@@ -528,7 +531,8 @@ async function downloadVideoResult(video: TaskResultVideo, resourceApiKey: strin
 
 export function buildSuperTokenImageOutput(model: string, request: ImageRequest) {
     const capability = superTokenImageCapability(model);
-    const output: Record<string, unknown> = { count: 1, format: "png" };
+    const count = Math.min(capability?.maxOutputsPerRequest || 1, Math.max(1, Math.floor(request.count || 1)));
+    const output: Record<string, unknown> = { count, format: "png" };
     if (model.startsWith("gemini-")) {
         const dimensions = request.size?.match(/^(\d+)x(\d+)$/);
         output.aspect_ratio = request.size?.includes(":") ? request.size : dimensions ? closestRatio(Number(dimensions[1]), Number(dimensions[2]), capability?.aspectRatios || ["1:1"]) : "1:1";

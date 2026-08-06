@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      SUPERTOKEN_BASE_URL: ${SUPERTOKEN_BASE_URL:-https://supertoken.cc}
     ports:
       - "10001:3000"
     restart: unless-stopped

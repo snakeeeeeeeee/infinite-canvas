@@ -4,6 +4,7 @@ set -e
 # Executed automatically by the official nginx image entrypoint through /docker-entrypoint.d/*.sh before nginx starts.
 # Generate runtime config.js from environment variables. Each analytics provider has an independent variable;
 # unset providers remain disabled, load no scripts, and send no external requests. Multiple providers may be enabled together.
+# The SuperToken URL is Base64-encoded before interpolation so arbitrary URL characters cannot break config.js.
 
 # GA4 and Baidu IDs contain only letters, numbers, and hyphens. Remove other characters
 # so quotes and similar values cannot break the JavaScript strings in config.js as a defense-in-depth measure.
@@ -13,10 +14,12 @@ sanitize_id() {
 
 GA4_ID=$(sanitize_id "${ANALYTICS_GA4_ID:-}")
 BAIDU_ID=$(sanitize_id "${ANALYTICS_BAIDU_ID:-}")
+SUPERTOKEN_BASE_URL_BASE64=$(printf '%s' "${SUPERTOKEN_BASE_URL:-}" | base64 | tr -d '\n')
 
 cat > /usr/share/nginx/html/config.js <<EOF
 window.__RUNTIME_CONFIG__ = {
   ANALYTICS_GA4_ID: "${GA4_ID}",
-  ANALYTICS_BAIDU_ID: "${BAIDU_ID}"
+  ANALYTICS_BAIDU_ID: "${BAIDU_ID}",
+  SUPERTOKEN_BASE_URL: atob("${SUPERTOKEN_BASE_URL_BASE64}")
 };
 EOF
