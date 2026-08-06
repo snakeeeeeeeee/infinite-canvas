@@ -504,6 +504,7 @@ export default {
             unsupportedHint: "以下模型由账号返回，但当前异步能力表尚未支持",
             imageKeyRequired: "请先填写生图 Model API Key",
             videoKeyRequired: "请先填写视频 Model API Key",
+            resourceKeyRequired: "必须填写 Resource API Key，用于查询任务和下载结果",
             refreshKeyRequired: "请至少填写一个生图或视频 Model API Key",
             modelsLoaded: "已读取 {{count}} 个模型",
             allModelsLoaded: "已读取图片 {{images}} 个、视频 {{videos}} 个模型",

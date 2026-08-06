@@ -504,6 +504,7 @@ export default {
             unsupportedHint: "These account models are not supported by the current async capability catalog",
             imageKeyRequired: "Enter the image Model API Key first",
             videoKeyRequired: "Enter the video Model API Key first",
+            resourceKeyRequired: "Resource API Key is required to query tasks and download results",
             refreshKeyRequired: "Enter at least one image or video Model API Key",
             modelsLoaded: "Loaded {{count}} models",
             allModelsLoaded: "Loaded {{images}} image and {{videos}} video models",

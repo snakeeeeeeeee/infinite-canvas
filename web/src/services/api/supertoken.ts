@@ -555,14 +555,17 @@ export function buildSuperTokenVideoPayload(params: {
     audios: Array<{ url: string; name: string }>;
 }) {
     const { model, prompt, capability, referenceMode, duration, aspectRatio, generateAudio, images, videos, audios } = params;
+    const namedImages = referenceNames(images, "image");
+    const namedVideos = referenceNames(videos, "video");
+    const namedAudios = referenceNames(audios, "audio");
     const input: Record<string, unknown> = { prompt };
     if (images.length || videos.length || audios.length) input.reference_mode = referenceMode;
-    const imageFields = superTokenReferenceImageFields(capability, referenceMode, images);
+    const imageFields = superTokenReferenceImageFields(capability, referenceMode, namedImages);
     if (imageFields.image) input.image = imageFields.image;
     if (imageFields.referenceImages.length) input.reference_images = imageFields.referenceImages;
     if (referenceMode === "media") {
-        if (videos.length) input.reference_videos = videos;
-        if (audios.length) input.reference_audios = audios;
+        if (namedVideos.length) input.reference_videos = namedVideos;
+        if (namedAudios.length) input.reference_audios = namedAudios;
     }
     const output: Record<string, unknown> = { duration, aspect_ratio: aspectRatio };
     if (capability.audioPolicy !== "unsupported") output.generate_audio = generateAudio;
@@ -671,6 +674,10 @@ function isHttpUrl(value: string) {
 function sourceName(name: string, kind: string, index: number) {
     const value = name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
     return value || `${kind}-${index + 1}`;
+}
+
+function referenceNames<T extends { url: string; name: string }>(items: T[], kind: MediaUploadInput["kind"]) {
+    return items.map((item, index) => ({ ...item, name: `${kind}-${index + 1}` }));
 }
 
 function defaultMime(kind: MediaUploadInput["kind"]) {

@@ -1,13 +1,29 @@
 import { describe, expect, test } from "bun:test";
 
-import { superTokenVideoCapability } from "../src/lib/supertoken-capabilities";
-import {
+if (!("localStorage" in globalThis)) {
+    const values = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+        value: {
+            getItem: (key: string) => values.get(key) ?? null,
+            setItem: (key: string, value: string) => values.set(key, value),
+            removeItem: (key: string) => values.delete(key),
+            clear: () => values.clear(),
+            key: (index: number) => Array.from(values.keys())[index] ?? null,
+            get length() {
+                return values.size;
+            },
+        } satisfies Storage,
+    });
+}
+
+const { superTokenVideoCapability } = await import("../src/lib/supertoken-capabilities");
+const {
     buildSuperTokenImageOutput,
     buildSuperTokenMediaUploadFiles,
     buildSuperTokenVideoPayload,
     parseSuperTokenRetryAfter,
     superTokenImageSlotIdempotencyKey,
-} from "../src/services/api/supertoken";
+} = await import("../src/services/api/supertoken");
 
 describe("SuperToken request mapping", () => {
     test("maps Gemini image output to async task fields", () => {
@@ -22,7 +38,7 @@ describe("SuperToken request mapping", () => {
         ).toEqual({ count: 1, format: "png", aspect_ratio: "16:9", resolution: "2K", quality: "auto" });
     });
 
-    test("maps Seedance media and omits duplicate resolution", () => {
+    test("assigns globally unique ordered names to Seedance media references", () => {
         const payload = buildSuperTokenVideoPayload({
             model: "leonardo-seedance-2.0-fast-480p",
             prompt: "test",
@@ -31,19 +47,48 @@ describe("SuperToken request mapping", () => {
             duration: 4,
             aspectRatio: "16:9",
             generateAudio: true,
-            images: [{ url: "https://example.com/image.png", name: "image" }],
-            videos: [{ url: "https://example.com/video.mp4", name: "video" }],
-            audios: [{ url: "https://example.com/audio.mp3", name: "audio" }],
+            images: [
+                { url: "https://example.com/image-1.png", name: "same-name" },
+                { url: "https://example.com/image-2.png", name: "same-name" },
+            ],
+            videos: [{ url: "https://example.com/video.mp4", name: "same-name" }],
+            audios: [{ url: "https://example.com/audio.mp3", name: "same-name" }],
         });
         expect(payload.input).toEqual({
             prompt: "test",
             reference_mode: "media",
-            reference_images: [{ url: "https://example.com/image.png", name: "image" }],
-            reference_videos: [{ url: "https://example.com/video.mp4", name: "video" }],
-            reference_audios: [{ url: "https://example.com/audio.mp3", name: "audio" }],
+            reference_images: [
+                { url: "https://example.com/image-1.png", name: "image-1" },
+                { url: "https://example.com/image-2.png", name: "image-2" },
+            ],
+            reference_videos: [{ url: "https://example.com/video.mp4", name: "video-1" }],
+            reference_audios: [{ url: "https://example.com/audio.mp3", name: "audio-1" }],
         });
         expect(payload.output).toEqual({ duration: 4, aspect_ratio: "16:9", generate_audio: true });
         expect(payload.output).not.toHaveProperty("resolution");
+    });
+
+    test("keeps four same-title Seedance Canvas images ordered with unique names", () => {
+        const images = [1, 2, 3, 4].map((index) => ({ url: `https://example.com/reference-${index}.png`, name: "Generated-Image" }));
+        const payload = buildSuperTokenVideoPayload({
+            model: "adobe-seedance-2.0-480p",
+            prompt: "test",
+            capability: superTokenVideoCapability("adobe-seedance-2.0")!,
+            referenceMode: "media",
+            duration: 4,
+            aspectRatio: "16:9",
+            generateAudio: true,
+            images,
+            videos: [],
+            audios: [],
+        });
+        expect(payload.input.reference_images).toEqual([
+            { url: "https://example.com/reference-1.png", name: "image-1" },
+            { url: "https://example.com/reference-2.png", name: "image-2" },
+            { url: "https://example.com/reference-3.png", name: "image-3" },
+            { url: "https://example.com/reference-4.png", name: "image-4" },
+        ]);
+        expect(images.every((image) => image.name === "Generated-Image")).toBe(true);
     });
 
     test("maps MiniMax frame images to ordered first and last frames", () => {
@@ -65,8 +110,8 @@ describe("SuperToken request mapping", () => {
         expect(payload.input).toEqual({
             prompt: "test",
             reference_mode: "frame",
-            image: { url: "https://example.com/start.png", name: "start" },
-            reference_images: [{ url: "https://example.com/end.png", name: "end" }],
+            image: { url: "https://example.com/start.png", name: "image-1" },
+            reference_images: [{ url: "https://example.com/end.png", name: "image-2" }],
         });
     });
 

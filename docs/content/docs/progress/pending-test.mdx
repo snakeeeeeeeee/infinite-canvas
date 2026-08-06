@@ -18,7 +18,9 @@ The current release needs manual verification in these areas:
 - Local source Docker Compose deployment should serve the frontend at host port 10001 while the container continues listening on port 3000.
 - Provider empty state: new installs should have no built-in providers or default models; model selectors without a usable provider should open provider settings directly instead of showing an empty menu.
 - SuperToken provider setup with fixed mainland/global regions, independent image/video Model API Keys, a shared Resource API Key, partial or full model refresh, and video choices limited to Kling, Seedance 2.0, and MiniMax H3. Either media capability should work without configuring the other.
+- SuperToken provider editing should mark the shared Resource API Key as required, show a field error when it is empty, and keep Save disabled until a non-empty value is entered.
 - SuperToken image generation/edit and video frame/images/media modes across the image workbench, video workbench, and Canvas, including durable polling recovery, local stop behavior, protected result downloads, and local Blob persistence.
+- SuperToken video requests with repeated Canvas node titles should assign stable `image-N`, `video-N`, and `audio-N` reference names without changing media order or upload filenames.
 - Switching among Kling, Seedance, and MiniMax H3 should retain all reference media while applying the same model defaults in the video workbench and Canvas: Kling 3.0 uses start/end frames, Kling Omni and MiniMax H3 use image references, and Seedance uses mixed media. Resolution uses the lowest account-available SKU and duration uses the shortest supported value.
 - SuperToken browser media upload and real Adobe/Leonardo generation have been verified after enabling the deployed Canvas origins, `PUT`, and `Content-Type` in the target R2 bucket CORS policy.
 

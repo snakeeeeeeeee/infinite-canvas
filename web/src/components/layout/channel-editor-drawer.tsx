@@ -33,6 +33,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
 
     const patch = (value: Partial<ModelChannel>) => setDraft((current) => (current ? { ...current, ...value } : current));
     const isSuperToken = draft.provider === "supertoken";
+    const resourceKeyMissing = isSuperToken && !draft.supertoken?.resourceApiKey.trim();
     const setModels = (models: ChannelModel[]) => patch({ models });
 
     const changeApiFormat = (apiFormat: ApiCallFormat) => {
@@ -115,6 +116,10 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     };
 
     const save = () => {
+        if (resourceKeyMissing) {
+            message.error(t("config.superToken.resourceKeyRequired"));
+            return;
+        }
         onSave(isSuperToken ? createSuperTokenChannel({ ...draft, name: draft.name.trim() || "SuperToken" }) : { ...draft, name: draft.name.trim() || t("config.channels.unnamed"), models: normalizeChannelModels(draft.models) });
         onClose();
     };
@@ -129,7 +134,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
             extra={
                 <Space>
                     <Button onClick={onClose}>{t("common.cancel")}</Button>
-                    <Button type="primary" onClick={save}>
+                    <Button type="primary" disabled={resourceKeyMissing} onClick={save}>
                         {t("common.save")}
                     </Button>
                 </Space>
@@ -276,6 +281,8 @@ function SuperTokenEditor({
                 value={settings.resourceApiKey}
                 placeholder="ak_..."
                 loading={checking === "resource"}
+                required
+                error={t("config.superToken.resourceKeyRequired")}
                 onChange={(resourceApiKey) => onPatch({ resourceApiKey })}
                 onTest={onTestResource}
             />
@@ -298,15 +305,20 @@ function SuperTokenEditor({
     );
 }
 
-function KeyField({ icon, label, value, placeholder, loading, onChange, onTest }: { icon: ReactNode; label: string; value: string; placeholder: string; loading: boolean; onChange: (value: string) => void; onTest: () => void }) {
+function KeyField({ icon, label, value, placeholder, loading, required = false, error, onChange, onTest }: { icon: ReactNode; label: string; value: string; placeholder: string; loading: boolean; required?: boolean; error?: string; onChange: (value: string) => void; onTest: () => void }) {
     const { t } = useTranslation();
+    const invalid = required && !value.trim();
     return (
         <label className="block">
-            <span className="mb-1.5 flex items-center gap-2 text-sm font-medium">{icon}{label}</span>
+            <span className="mb-1.5 flex items-center gap-2 text-sm font-medium">
+                {icon}
+                <span>{label}{required ? <span className="text-red-500 dark:text-red-400" aria-hidden="true"> *</span> : null}</span>
+            </span>
             <div className="flex gap-2">
-                <Input.Password value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+                <Input.Password value={value} status={invalid ? "error" : undefined} aria-required={required} aria-invalid={invalid} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
                 <Button loading={loading} onClick={onTest}>{t("config.superToken.verify")}</Button>
             </div>
+            {invalid && error ? <span className="mt-1.5 block text-xs text-red-500 dark:text-red-400">{error}</span> : null}
         </label>
     );
 }
