@@ -21,6 +21,7 @@ export type SuperTokenVideoCapability = {
     duration: { min: number; max: number; values?: number[] };
     aspectRatios: string[];
     referenceModes: Partial<Record<SuperTokenReferenceMode, SuperTokenReferenceLimits>>;
+    defaultReferenceMode: SuperTokenReferenceMode;
     audioPolicy: SuperTokenAudioPolicy;
     fixedResolution?: string;
 };
@@ -65,6 +66,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
             frame: { images: 2, videos: 0, audios: 0, total: 2 },
             media: { images: 9, videos: 3, audios: 3, total: 12 },
         },
+        defaultReferenceMode: "media",
         audioPolicy: "optional",
     },
     {
@@ -77,6 +79,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
             frame: { images: 2, videos: 0, audios: 0, total: 2 },
             media: { images: 9, videos: 3, audios: 3, total: 12 },
         },
+        defaultReferenceMode: "media",
         audioPolicy: "optional",
     },
     {
@@ -86,6 +89,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         duration: { min: 4, max: 15 },
         aspectRatios: SIX_VIDEO_RATIOS,
         referenceModes: { media: { images: 4, videos: 3, audios: 1, audioRequiresVisual: true } },
+        defaultReferenceMode: "media",
         audioPolicy: "optional",
     },
     {
@@ -95,6 +99,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         duration: { min: 4, max: 15 },
         aspectRatios: SIX_VIDEO_RATIOS,
         referenceModes: { media: { images: 4, videos: 3, audios: 1, audioRequiresVisual: true } },
+        defaultReferenceMode: "media",
         audioPolicy: "optional",
     },
     {
@@ -104,6 +109,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         duration: { min: 3, max: 15 },
         aspectRatios: ["16:9", "9:16"],
         referenceModes: { frame: { images: 2, videos: 0, audios: 0, total: 2 } },
+        defaultReferenceMode: "frame",
         audioPolicy: "optional",
     },
     {
@@ -116,6 +122,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
             frame: { images: 2, videos: 0, audios: 0, total: 2 },
             images: { images: 3, videos: 0, audios: 0, total: 3 },
         },
+        defaultReferenceMode: "images",
         audioPolicy: "optional",
     },
     {
@@ -129,6 +136,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
             images: { images: 5, videos: 0, audios: 0, total: 5, minImages: 1, imageLayout: "primary-first" },
             media: { images: 5, videos: 0, audios: 3, total: 8, minImages: 1, minAudios: 1, imageLayout: "primary-first" },
         },
+        defaultReferenceMode: "images",
         audioPolicy: "required",
         fixedResolution: "1440p",
     },
@@ -218,9 +226,7 @@ export function superTokenUnsupportedModels(imageModelIds: string[], videoModelI
 
 export function defaultSuperTokenReferenceMode(capability: SuperTokenVideoCapability | undefined) {
     if (!capability) return "frame" as const;
-    if (capability.referenceModes.frame) return "frame" as const;
-    if (capability.referenceModes.images) return "images" as const;
-    return "media" as const;
+    return capability.defaultReferenceMode;
 }
 
 export function normalizeSuperTokenReferenceMode(capability: SuperTokenVideoCapability, value: string | undefined): SuperTokenReferenceMode {

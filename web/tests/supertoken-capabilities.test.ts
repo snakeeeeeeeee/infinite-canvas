@@ -66,11 +66,15 @@ describe("SuperToken video request capabilities", () => {
 
     test("falls back to each model's default mode without changing supported modes", () => {
         const kling = superTokenVideoCapability("adobe-kling-3.0")!;
+        const adobeSeedance = superTokenVideoCapability("adobe-seedance-2.0")!;
         const leonardoSeedance = superTokenVideoCapability("leonardo-seedance-2.0")!;
+        const klingOmni = superTokenVideoCapability("adobe-kling-3.0-omni")!;
         const minimax = superTokenVideoCapability("leonardo-minimax-h3")!;
         expect(normalizeSuperTokenReferenceMode(kling, "media")).toBe("frame");
+        expect(normalizeSuperTokenReferenceMode(adobeSeedance, "images")).toBe("media");
         expect(normalizeSuperTokenReferenceMode(leonardoSeedance, "frame")).toBe("media");
-        expect(normalizeSuperTokenReferenceMode(minimax, "images")).toBe("images");
+        expect(normalizeSuperTokenReferenceMode(klingOmni, "media")).toBe("images");
+        expect(normalizeSuperTokenReferenceMode(minimax, undefined)).toBe("images");
 
         for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
             const capability = superTokenVideoCapability(family)!;
@@ -88,13 +92,13 @@ describe("SuperToken video request capabilities", () => {
             expect(resolutions).toContain(settings.resolution);
             expect(settings.resolution).toBe(capability.fixedResolution || "480p");
             expect(settings.aspectRatio).toBe("16:9");
-            expect(settings.referenceMode).toBe(family.startsWith("leonardo-seedance") ? "media" : "frame");
+            expect(settings.referenceMode).toBe(capability.defaultReferenceMode);
             expect(settings.duration).toBe(capability.duration.values?.[0] || capability.duration.min);
             expect(settings.generateAudio).toBe(true);
         }
 
         const minimax = normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["1440p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false }, true);
-        expect(minimax).toEqual({ resolution: "1440p", aspectRatio: "16:9", duration: 5, referenceMode: "frame", generateAudio: true });
+        expect(minimax).toEqual({ resolution: "1440p", aspectRatio: "16:9", duration: 5, referenceMode: "images", generateAudio: true });
         expect(normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["1440p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false })).toEqual(minimax);
     });
 });

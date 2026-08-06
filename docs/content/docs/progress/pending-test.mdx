@@ -19,7 +19,7 @@ The current release needs manual verification in these areas:
 - Provider empty state: new installs should have no built-in providers or default models; model selectors without a usable provider should open provider settings directly instead of showing an empty menu.
 - SuperToken provider setup with fixed mainland/global regions, independent image/video Model API Keys, a shared Resource API Key, partial or full model refresh, and video choices limited to Kling, Seedance 2.0, and MiniMax H3. Either media capability should work without configuring the other.
 - SuperToken image generation/edit and video frame/images/media modes across the image workbench, video workbench, and Canvas, including durable polling recovery, local stop behavior, protected result downloads, and local Blob persistence.
-- Switching among Kling, Seedance, and MiniMax H3 should retain all reference media while resetting resolution, duration, aspect ratio, reference mode, and audio to the new model defaults; resolution uses the lowest account-available SKU and duration uses the shortest supported value.
+- Switching among Kling, Seedance, and MiniMax H3 should retain all reference media while applying the same model defaults in the video workbench and Canvas: Kling 3.0 uses start/end frames, Kling Omni and MiniMax H3 use image references, and Seedance uses mixed media. Resolution uses the lowest account-available SKU and duration uses the shortest supported value.
 - SuperToken browser media upload and real Adobe/Leonardo generation have been verified after enabling the deployed Canvas origins, `PUT`, and `Content-Type` in the target R2 bucket CORS policy.
 
 The Chinese version contains the complete item-by-item acceptance checklist.

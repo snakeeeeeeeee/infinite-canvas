@@ -372,11 +372,14 @@ function withChannels(config: AiConfig, channels: ModelChannel[]): AiConfig {
         apiFormat: channels[0]?.apiFormat || config.apiFormat,
     };
     const imageModel = pickDefaultModel(next, "image", config.imageModel);
+    const videoModel = pickDefaultModel(next, "video", config.videoModel);
+    const videoDefaults = videoModel !== config.videoModel ? superTokenVideoConfigPatch(next, videoModel, true) || {} : {};
     return {
         ...next,
+        ...videoDefaults,
         model: imageModel,
         imageModel,
-        videoModel: pickDefaultModel(next, "video", config.videoModel),
+        videoModel,
         textModel: pickDefaultModel(next, "text", config.textModel),
         audioModel: pickDefaultModel(next, "audio", config.audioModel),
     };
