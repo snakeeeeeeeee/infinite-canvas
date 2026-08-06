@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
+import { normalizeSuperTokenVideoSettings, superTokenBaseUrl, superTokenModelLabel, superTokenSelectableModels, superTokenVideoCapability, superTokenVideoResolutions, type SuperTokenReferenceMode, type SuperTokenRegion } from "@/lib/supertoken-capabilities";
 
 export type ApiCallFormat = "openai" | "gemini" | "ark";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -15,6 +16,16 @@ export type ChannelModel = {
     script?: string;
 };
 
+export type SuperTokenChannelConfig = {
+    region: SuperTokenRegion;
+    imageApiKey: string;
+    videoApiKey: string;
+    resourceApiKey: string;
+    imageModels: string[];
+    videoModels: string[];
+    syncedAt?: number;
+};
+
 export type ModelChannel = {
     id: string;
     name: string;
@@ -22,6 +33,8 @@ export type ModelChannel = {
     apiKey: string;
     apiFormat: ApiCallFormat;
     models: ChannelModel[];
+    provider?: "custom" | "supertoken";
+    supertoken?: SuperTokenChannelConfig;
 };
 
 export type AiConfig = {
@@ -43,10 +56,12 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoReferenceMode: SuperTokenReferenceMode;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     models: string[];
     quality: string;
+    imageResolution: string;
     size: string;
     background: string;
     count: string;
@@ -80,6 +95,7 @@ export const defaultConfig: AiConfig = {
             baseUrl: OPENAI_BASE_URL,
             apiKey: "",
             apiFormat: "openai",
+            provider: "custom",
             models: [
                 { name: "gpt-image-2", capability: "image" },
                 { name: "grok-imagine-video", capability: "video" },
@@ -87,6 +103,7 @@ export const defaultConfig: AiConfig = {
                 { name: "gpt-4o-mini-tts", capability: "audio" },
             ],
         },
+        createSuperTokenChannel(),
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
@@ -101,10 +118,12 @@ export const defaultConfig: AiConfig = {
     vquality: "720",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    videoReferenceMode: "frame",
     systemPrompt: "",
     reasoningEffort: "auto",
     models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
+    imageResolution: "1K",
     size: "1:1",
     background: "",
     count: "1",
@@ -126,6 +145,7 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    updateConfigPatch: (patch: Partial<AiConfig>) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
@@ -183,6 +203,11 @@ export function resolveModelScript(config: AiConfig, value: string) {
 
 function isAiConfigReady(config: AiConfig, model: string) {
     const channel = resolveModelChannel(config, model);
+    if (channel.provider === "supertoken") {
+        const capability = modelCapabilityOf(config, model);
+        const modelKey = capability === "video" ? channel.supertoken?.videoApiKey : channel.supertoken?.imageApiKey;
+        return Boolean(model.trim() && modelKey?.trim() && channel.supertoken?.resourceApiKey.trim());
+    }
     return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }
 
@@ -201,6 +226,7 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            updateConfigPatch: (patch) => set((state) => ({ config: { ...state.config, ...patch } })),
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
                     webdav: {
@@ -242,10 +268,12 @@ export const useConfigStore = create<ConfigStore>()(
                         audioSpeed: config.audioSpeed || defaultConfig.audioSpeed,
                         audioInstructions: config.audioInstructions || "",
                         reasoningEffort: config.reasoningEffort || "auto",
+                        imageResolution: config.imageResolution || "1K",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoReferenceMode: config.videoReferenceMode || "frame",
                         canvasImageCount: config.canvasImageCount || "3",
                     },
                 };
@@ -275,6 +303,7 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
 }
 
 export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {
+    if (channel?.provider === "supertoken") return createSuperTokenChannel(channel);
     const apiFormat = normalizeApiFormat(channel?.apiFormat);
     return {
         id: channel?.id?.trim() || nanoid(),
@@ -283,6 +312,30 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
         apiKey: channel?.apiKey || "",
         apiFormat,
         models: normalizeChannelModels(channel?.models),
+        provider: "custom",
+    };
+}
+
+export function createSuperTokenChannel(channel?: Partial<ModelChannel>): ModelChannel {
+    const source = channel?.supertoken;
+    const supertoken: SuperTokenChannelConfig = {
+        region: source?.region === "global" ? "global" : "cn",
+        imageApiKey: source?.imageApiKey || "",
+        videoApiKey: source?.videoApiKey || "",
+        resourceApiKey: source?.resourceApiKey || "",
+        imageModels: uniqueModelOptions(source?.imageModels || []),
+        videoModels: uniqueModelOptions(source?.videoModels || []),
+        syncedAt: source?.syncedAt,
+    };
+    return {
+        id: channel?.id?.trim() || "supertoken",
+        name: channel?.name?.trim() || "SuperToken",
+        baseUrl: superTokenBaseUrl(supertoken.region),
+        apiKey: supertoken.imageApiKey,
+        apiFormat: "openai",
+        provider: "supertoken",
+        supertoken,
+        models: superTokenSelectableModels(supertoken.imageModels, supertoken.videoModels),
     };
 }
 
@@ -308,6 +361,9 @@ export function modelOptionLabel(config: AiConfig, value: string) {
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
+    if (channel?.provider === "supertoken") {
+        return `${superTokenModelLabel(decoded.model)}（${channel.name}）`;
+    }
     return channel ? `${decoded.model}（${channel.name}）` : decoded.model;
 }
 
@@ -336,12 +392,60 @@ export function resolveModelChannel(config: AiConfig, value: string) {
 
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
     const channel = resolveModelChannel(config, value);
+    const capability = modelCapabilityOf(config, value);
+    if (channel.provider === "supertoken") {
+        return {
+            ...config,
+            model: modelOptionName(value || config.model),
+            baseUrl: superTokenBaseUrl(channel.supertoken?.region),
+            apiKey: capability === "video" ? channel.supertoken?.videoApiKey || "" : channel.supertoken?.imageApiKey || "",
+            apiFormat: "openai" as const,
+            provider: "supertoken" as const,
+            channelId: channel.id,
+            resourceApiKey: channel.supertoken?.resourceApiKey || "",
+            availableImageModels: channel.supertoken?.imageModels || [],
+            availableVideoModels: channel.supertoken?.videoModels || [],
+        };
+    }
     return {
         ...config,
         model: modelOptionName(value || config.model),
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
+        provider: "custom" as const,
+        channelId: channel.id,
+        resourceApiKey: "",
+        availableImageModels: [] as string[],
+        availableVideoModels: [] as string[],
+    };
+}
+
+export type SuperTokenVideoConfigPatch = Pick<AiConfig, "vquality" | "size" | "videoSeconds" | "videoReferenceMode" | "videoGenerateAudio">;
+
+export function superTokenVideoConfigPatch(config: AiConfig, model: string, reset = false): SuperTokenVideoConfigPatch | null {
+    const requestConfig = resolveModelRequestConfig(config, model);
+    if (requestConfig.provider !== "supertoken") return null;
+    const capability = superTokenVideoCapability(requestConfig.model);
+    if (!capability) return null;
+    const settings = normalizeSuperTokenVideoSettings(
+        capability,
+        superTokenVideoResolutions(capability.family, requestConfig.availableVideoModels),
+        {
+            resolution: config.vquality,
+            aspectRatio: config.size,
+            duration: Number(config.videoSeconds),
+            referenceMode: config.videoReferenceMode,
+            generateAudio: config.videoGenerateAudio !== "false",
+        },
+        reset,
+    );
+    return {
+        vquality: settings.resolution.replace(/p$/i, ""),
+        size: settings.aspectRatio,
+        videoSeconds: String(settings.duration),
+        videoReferenceMode: settings.referenceMode,
+        videoGenerateAudio: String(settings.generateAudio),
     };
 }
 
@@ -353,6 +457,8 @@ function normalizeChannels(config: AiConfig) {
             id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
             name: channel.name || (index === 0 ? i18n.t("config.channels.defaultName") : i18n.t("config.channels.indexedName", { index: index + 1 })),
             models: normalizeChannelModels(channel.models),
+            provider: channel.provider,
+            supertoken: channel.supertoken,
         }),
     );
     if (!channels.length) {

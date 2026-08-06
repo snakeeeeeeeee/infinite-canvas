@@ -8,6 +8,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, resolveModelScript, type AiConfig } from "@/stores/use-config-store";
 import { runModelPlugin } from "./model-plugin";
+import { createSuperTokenVideoTask, pollSuperTokenVideoTask, type SuperTokenTaskRecord } from "./supertoken";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
@@ -23,12 +24,18 @@ type SeedanceTask = {
     video_url?: string;
 };
 type ApiEnvelope<T> = T | { code?: number | string; data?: T | null; msg?: string; message?: string; error?: { message?: string } };
-type RequestOptions = { signal?: AbortSignal };
+export type VideoRequestOptions = {
+    signal?: AbortSignal;
+    onTaskCreated?: (task: SuperTokenTaskRecord) => void | Promise<void>;
+    onProgress?: (task: SuperTokenTaskRecord) => void;
+    context?: SuperTokenTaskRecord["context"];
+};
+type RequestOptions = VideoRequestOptions;
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "plugin"; model: string };
-export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
+export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; stored?: UploadedFile };
+export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "plugin" | "supertoken"; model: string; superTokenTask?: SuperTokenTaskRecord };
+export type VideoGenerationTaskState = { status: "pending"; progress?: number; progressKnown?: boolean; retryAfterMs?: number } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 /** Results for scripted (plugin) video models, which run their own create+poll in one shot at task creation. */
 const pluginVideoResults = new Map<string, VideoGenerationResult>();
@@ -47,13 +54,13 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
     const delayMs = task.provider === "seedance" ? 5000 : 2500;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    for (let attempt = 0; task.provider === "supertoken" || attempt < 120; attempt += 1) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error(apiText("videoTimeout", { provider: task.provider === "seedance" ? "Seedance " : "" }));
-        await delay(delayMs, options?.signal);
+        if (task.provider !== "supertoken" && attempt === 119) throw new Error(apiText("videoTimeout", { provider: task.provider === "seedance" ? "Seedance " : "" }));
+        await delay(state.status === "pending" && state.retryAfterMs ? state.retryAfterMs : delayMs, options?.signal);
     }
     throw new Error(apiText("videoTimeout", { provider: "" }));
 }
@@ -64,6 +71,10 @@ export async function createVideoGenerationTask(config: AiConfig, prompt: string
     const script = resolveModelScript(config, selectedModel);
     if (script) return createPluginVideoTask(requestConfig, selectedModel, script, prompt, references, options);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (requestConfig.provider === "supertoken") {
+        const task = await createSuperTokenVideoTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
+        return { id: task.id, provider: "supertoken", model: selectedModel, superTokenTask: task };
+    }
     if (isSeedanceVideoConfig(requestConfig)) {
         return createSeedanceTask(requestConfig, selectedModel, prompt, references, videoReferences, audioReferences, options);
     }
@@ -80,6 +91,10 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
     }
     const requestConfig = resolveModelRequestConfig(config, task.model);
     assertVideoConfig(requestConfig, requestConfig.model);
+    if (task.provider === "supertoken") {
+        if (requestConfig.provider !== "supertoken" || !task.superTokenTask) return { status: "failed", error: "SuperToken 任务配置已丢失" };
+        return pollSuperTokenVideoTask({ ...requestConfig, baseUrl: task.superTokenTask.baseUrl }, task.superTokenTask, options);
+    }
     return task.provider === "seedance" ? pollSeedanceTask(requestConfig, task, options) : pollOpenAIVideoTask(requestConfig, task, options);
 }
 
@@ -123,6 +138,7 @@ function videoPluginResult(result: unknown): VideoGenerationResult {
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
+    if (result.stored) return result.stored;
     if (result.blob) return uploadMediaFile(result.blob, "video");
     if (result.url) {
         try {

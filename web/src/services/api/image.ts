@@ -1,8 +1,9 @@
 import axios from "axios";
 
 import i18n from "@/i18n";
-import { buildApiUrl, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
+import { buildApiUrl, encodeChannelModel, resolveModelRequestConfig, resolveModelScript, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { normalizePluginImages, runModelPlugin } from "./model-plugin";
+import { requestSuperTokenImages, resumeSuperTokenImageTask, type SuperTokenTaskRecord } from "./supertoken";
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
@@ -94,7 +95,17 @@ type GeminiPayload = {
     promptFeedback?: { blockReason?: string };
 };
 type GeminiStreamState = { buffer: string; text: string; toolCalls: ResponseToolCall[]; error?: string };
-type RequestOptions = { signal?: AbortSignal };
+export type ImageRequestOptions = {
+    signal?: AbortSignal;
+    pollSignal?: AbortSignal;
+    idempotencyKey?: string;
+    clientReferenceId?: string;
+    onTaskCreated?: (task: SuperTokenTaskRecord) => void | Promise<void>;
+    onProgress?: (task: SuperTokenTaskRecord) => void;
+    context?: SuperTokenTaskRecord["context"];
+};
+export type GeneratedImageResult = { id: string; dataUrl: string; storageKey?: string; width?: number; height?: number; bytes?: number; mimeType?: string };
+type RequestOptions = ImageRequestOptions;
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -713,7 +724,7 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
     return images;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
+export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions): Promise<GeneratedImageResult[]> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -732,6 +743,23 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+    if (requestConfig.provider === "supertoken") {
+        const quality = normalizeQuality(config.quality);
+        const size = requestConfig.model.startsWith("gemini-") ? config.size : resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
+        try {
+            const requests = Array.from({ length: n }, (_, index) =>
+                requestSuperTokenImages(
+                    requestConfig,
+                    { prompt: withSystemPrompt(requestConfig, prompt), references: [], size, quality: config.quality, resolution: config.imageResolution, background },
+                    { ...options, context: { ...options?.context, slot: index } },
+                ),
+            );
+            return (await Promise.all(requests)).flat();
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
@@ -771,7 +799,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions): Promise<GeneratedImageResult[]> {
     const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
@@ -792,6 +820,23 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        } catch (error) {
+            throw new Error(readAxiosError(error, apiText("requestFailed")));
+        }
+    }
+    if (requestConfig.provider === "supertoken") {
+        const quality = normalizeQuality(config.quality);
+        const size = requestConfig.model.startsWith("gemini-") ? config.size : resolveRequestSize(quality, config.size);
+        const background = normalizeBackground(config.background);
+        try {
+            const requests = Array.from({ length: n }, (_, index) =>
+                requestSuperTokenImages(
+                    requestConfig,
+                    { prompt: withSystemPrompt(requestConfig, requestPrompt), references, mask, size, quality: config.quality, resolution: config.imageResolution, background },
+                    { ...options, context: { ...options?.context, slot: index } },
+                ),
+            );
+            return (await Promise.all(requests)).flat();
         } catch (error) {
             throw new Error(readAxiosError(error, apiText("requestFailed")));
         }
@@ -865,6 +910,12 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     } catch (error) {
         throw new Error(readAxiosError(error, apiText("requestFailed")));
     }
+}
+
+export async function resumeImageGenerationTask(config: AiConfig, task: SuperTokenTaskRecord, options?: RequestOptions): Promise<GeneratedImageResult[]> {
+    const requestConfig = resolveModelRequestConfig(config, encodeChannelModel(task.channelId, task.selectedModel || task.model));
+    if (requestConfig.provider !== "supertoken") throw new Error("SuperToken 图片任务配置已丢失");
+    return resumeSuperTokenImageTask({ ...requestConfig, baseUrl: task.baseUrl }, task, options);
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {

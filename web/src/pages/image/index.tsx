@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -11,12 +11,14 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
-import { requestEdit, requestGeneration } from "@/services/api/image";
-import { deleteStoredImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { superTokenImageCapability } from "@/lib/supertoken-capabilities";
+import { requestEdit, requestGeneration, resumeImageGenerationTask } from "@/services/api/image";
+import { superTokenImageSlotIdempotencyKey, type SuperTokenTaskRecord } from "@/services/api/supertoken";
+import { deleteStoredImages, resolveImageUrl, storeGeneratedImage, uploadImage } from "@/services/image-storage";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 import type { ReferenceImage } from "@/types/image";
@@ -31,6 +33,7 @@ type GeneratedImage = {
     height: number;
     bytes: number;
     mimeType?: string;
+    slot?: number;
 };
 
 type GenerationResult = {
@@ -55,12 +58,14 @@ type GenerationLog = {
     imageCount: number;
     size: string;
     quality: string;
-    status: "success" | "failed";
+    status: "pending" | "success" | "failed";
     images: GeneratedImage[];
     thumbnails: string[];
+    tasks?: Array<{ slot: number; task: SuperTokenTaskRecord }>;
+    error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "imageResolution" | "size" | "count">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -73,6 +78,8 @@ export default function ImagePage() {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragDepthRef = useRef(0);
+    const activeLogIdsRef = useRef<Set<string>>(new Set());
+    const pollingControllersRef = useRef<Set<AbortController>>(new Set());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -102,7 +109,8 @@ export default function ImagePage() {
     const agentTaskIdRef = useRef<string | undefined>(undefined);
 
     const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const canGenerate = Boolean(prompt.trim());
+    const currentSelectionError = superTokenImageSelectionError(effectiveConfig, model, references);
+    const canGenerate = Boolean(prompt.trim()) && !currentSelectionError;
     const generationCount = Math.max(1, Math.min(10, Number(config.count) || 1));
 
     useEffect(() => {
@@ -177,9 +185,41 @@ export default function ImagePage() {
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
-        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot));
+        const logId = nanoid();
+        const pollingController = new AbortController();
+        pollingControllersRef.current.add(pollingController);
+        await saveLog(
+            buildLog({
+                id: logId,
+                prompt: text,
+                model,
+                config: { ...snapshot.config, count: String(generationCount) },
+                references: snapshot.references,
+                durationMs: 0,
+                successCount: 0,
+                failCount: 0,
+                status: "pending",
+                images: [],
+                tasks: [],
+            }),
+            false,
+        );
+
+        const tasks = Array.from({ length: generationCount }, (_, index) => runGenerationSlot(index, snapshot, logId, pollingController.signal));
 
         const result = await Promise.allSettled(tasks);
+        if (pollingController.signal.aborted) {
+            const pending = await logStore.getItem<GenerationLog>(logId);
+            const hasDurableTasks = Boolean(pending?.tasks?.length);
+            if (pending) await saveLog({ ...pending, status: hasDurableTasks ? "pending" : "failed", error: hasDurableTasks ? t("workbench.pollingPaused") : t("common.requestCanceled") }, false);
+            if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: hasDurableTasks ? t("workbench.pollingPaused") : t("common.requestCanceled") });
+            if (hasDurableTasks) setResults((value) => value.map((item) => ({ id: item.id, status: "pending" })));
+            message.warning(hasDurableTasks ? t("workbench.pollingPaused") : t("common.requestCanceled"));
+            pollingControllersRef.current.delete(pollingController);
+            setRunning(false);
+            setStartedAt(0);
+            return;
+        }
         const successImages = result.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value);
         const successCount = successImages.length;
         const failCount = generationCount - successCount;
@@ -190,12 +230,13 @@ export default function ImagePage() {
         try {
             const logImages = await Promise.all(
                 successImages.map(async (image) => {
-                    const stored = await uploadImage(image.dataUrl);
+                    const stored = await storeGeneratedImage(image);
                     return { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
                 }),
             );
-            saveLog(
+            await saveLog(
                 buildLog({
+                    id: logId,
                     prompt: text,
                     model,
                     config: { ...snapshot.config, count: String(generationCount) },
@@ -205,10 +246,12 @@ export default function ImagePage() {
                     failCount,
                     status: successCount ? "success" : "failed",
                     images: logImages,
+                    error,
                 }),
             );
             successCount ? message.success(t("imageWorkbench.generated")) : message.error(failed?.reason instanceof Error ? failed.reason.message : t("workbench.generationFailed"));
         } finally {
+            pollingControllersRef.current.delete(pollingController);
             setRunning(false);
         }
     };
@@ -283,7 +326,7 @@ export default function ImagePage() {
 
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
-        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
+        void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(() => refreshLogs());
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
             setResults([]);
@@ -292,11 +335,62 @@ export default function ImagePage() {
         setDeleteConfirmOpen(false);
     };
 
-    const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+    const saveLog = async (log: GenerationLog, resumePending = true) => {
+        await logStore.setItem(log.id, serializeLog(log));
+        await refreshLogs(resumePending);
     };
 
-    const refreshLogs = async () => setLogs(await readStoredLogs());
+    const refreshLogs = async (resumePending = true) => {
+        const next = await readStoredLogs();
+        setLogs(next);
+        if (resumePending) next.filter((log) => log.status === "pending" && log.tasks?.length).forEach((log) => void resumePendingLog(log));
+        return next;
+    };
+
+    const resumePendingLog = async (log: GenerationLog) => {
+        if (activeLogIdsRef.current.has(log.id) || !log.tasks?.length) return;
+        const pollingController = new AbortController();
+        activeLogIdsRef.current.add(log.id);
+        pollingControllersRef.current.add(pollingController);
+        setRunning(true);
+        setStartedAt((value) => value || performance.now());
+        setResults(Array.from({ length: log.imageCount }, (_, index) => ({ id: `${log.id}-${index}`, status: "pending" })));
+        try {
+            const settled = await Promise.allSettled(
+                log.tasks.map(async ({ slot, task }) => {
+                    const itemStartedAt = performance.now();
+                    const images = await resumeImageGenerationTask({ ...effectiveConfig, ...log.config, model: log.config.model || log.model }, task, { signal: pollingController.signal });
+                    const image = images[0];
+                    if (!image) throw new Error(t("imageWorkbench.missingResult"));
+                    const stored = await storeGeneratedImage(image);
+                    const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, slot };
+                    setResults((value) => updateResultAt(value, slot, { status: "success", image: nextImage }));
+                    return nextImage;
+                }),
+            );
+            if (pollingController.signal.aborted) {
+                await saveLog({ ...log, status: "pending", error: t("workbench.pollingPaused") }, false);
+                message.warning(t("workbench.pollingPaused"));
+                return;
+            }
+            const images = settled.filter((item): item is PromiseFulfilledResult<GeneratedImage> => item.status === "fulfilled").map((item) => item.value).sort((a, b) => (a.slot || 0) - (b.slot || 0));
+            const failCount = Math.max(0, log.imageCount - images.length);
+            const failed = settled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+            const error = failed?.reason instanceof Error ? failed.reason.message : failCount ? t("workbench.generationFailed") : undefined;
+            const completedLog = { ...log, status: (images.length ? "success" : "failed") as GenerationLog["status"], successCount: images.length, failCount, durationMs: Date.now() - log.createdAt, images, thumbnails: images.map((image) => image.dataUrl), error };
+            await saveLog(completedLog, false);
+            setResults(resultsFromLog(completedLog));
+            images.length ? message.success(t("imageWorkbench.generated")) : message.error(error || t("workbench.generationFailed"));
+        } finally {
+            activeLogIdsRef.current.delete(log.id);
+            pollingControllersRef.current.delete(pollingController);
+            if (!activeLogIdsRef.current.size) {
+                setRunning(false);
+                setStartedAt(0);
+            }
+            await refreshLogs(false);
+        }
+    };
 
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
@@ -305,9 +399,10 @@ export default function ImagePage() {
         setReferences(log.references || []);
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
+        if (log.config.imageResolution) updateConfig("imageResolution", log.config.imageResolution);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
+        setResults(log.status === "pending" ? Array.from({ length: log.imageCount }, (_, index) => ({ id: `${log.id}-${index}`, status: "pending" })) : resultsFromLog(log));
     };
 
     const buildRequestSnapshot = () => {
@@ -321,24 +416,40 @@ export default function ImagePage() {
             openConfigDialog(true);
             return null;
         }
+        const selectionError = superTokenImageSelectionError(effectiveConfig, model, references);
+        if (selectionError) {
+            message.error(selectionError);
+            return null;
+        }
         return { text, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
-    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }) => {
+    const runGenerationSlot = async (index: number, snapshot: { text: string; config: AiConfig; references: ReferenceImage[] }, logId?: string, pollSignal?: AbortSignal) => {
         const itemStartedAt = performance.now();
         try {
-            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references) : await requestGeneration(snapshot.config, snapshot.text);
+            const options = logId
+                ? {
+                      idempotencyKey: superTokenImageSlotIdempotencyKey(logId, index),
+                      clientReferenceId: `${logId}-${index}`,
+                      context: { target: "image-workbench", logId, slot: index },
+                      pollSignal,
+                      onTaskCreated: (task: SuperTokenTaskRecord) => attachTaskToLog(logId, index, task),
+                  }
+                : undefined;
+            const result = snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, options) : await requestGeneration(snapshot.config, snapshot.text, options);
             const image = result[0];
             if (!image) throw new Error(t("imageWorkbench.missingResult"));
-            const meta = await readImageMeta(image.dataUrl);
-            const nextImage = { id: image.id, dataUrl: image.dataUrl, durationMs: performance.now() - itemStartedAt, width: meta.width, height: meta.height, bytes: getDataUrlByteSize(image.dataUrl) };
+            const meta = image.width && image.height ? image : await readImageMeta(image.dataUrl);
+            const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, storageKey: image.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width || 0, height: meta.height || 0, bytes: image.bytes ?? getDataUrlByteSize(image.dataUrl), mimeType: image.mimeType, slot: index };
             setResults((value) => updateResultAt(value, index, { status: "success", image: nextImage }));
             return nextImage;
         } catch (error) {
-            setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
+            if (!isPollingCanceled(error)) setResults((value) => updateResultAt(value, index, { status: "failed", error: error instanceof Error ? error.message : t("workbench.generationFailed") }));
             throw error;
         }
     };
+
+    const stopPolling = () => pollingControllersRef.current.forEach((controller) => controller.abort());
 
     const retryResult = async (index: number) => {
         const snapshot = buildRequestSnapshot();
@@ -348,8 +459,8 @@ export default function ImagePage() {
         const retryStartedAt = performance.now();
         try {
             const image = await runGenerationSlot(index, snapshot);
-            const stored = await uploadImage(image.dataUrl);
-            const logImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
+            const stored = await storeGeneratedImage(image);
+            const logImage = { ...image, slot: 0, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType };
             setResults((value) => updateResultAt(value, index, { image: { ...image, dataUrl: stored.url, storageKey: stored.storageKey } }));
             saveLog(
                 buildLog({
@@ -493,9 +604,11 @@ export default function ImagePage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {t("workbench.generate")}
-                            </Button>
+                            {running && resolveModelRequestConfig(effectiveConfig, model).provider === "supertoken" ? (
+                                <Button danger size="large" block icon={<Square className="size-4" />} onClick={stopPolling}>{t("workbench.stopPolling")}</Button>
+                            ) : (
+                                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>{t("workbench.generate")}</Button>
+                            )}
                         </div>
                     </div>
 
@@ -574,7 +687,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={{ ...config, model }} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
     );
@@ -752,9 +865,11 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                 </div>
                 <div className="grid justify-items-end gap-2">
                     <div className="flex gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">
-                            {t("workbench.successCount", { count: log.successCount ?? log.imageCount })}
-                        </Tag>
+                        {log.status === "pending" ? (
+                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="processing">{t("workbench.generating")}</Tag>
+                        ) : (
+                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">{t("workbench.successCount", { count: log.successCount ?? log.imageCount })}</Tag>
+                        )}
                         {log.failCount ? (
                             <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="red">
                                 {t("workbench.failCount", { count: log.failCount })}
@@ -798,8 +913,9 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         })),
     );
     const images = await Promise.all(
-        (log.images || []).map(async (item) => ({
+        (log.images || []).map(async (item, index) => ({
             ...item,
+            slot: item.slot ?? index,
             dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl),
         })),
     );
@@ -822,7 +938,17 @@ async function normalizeLog(log: Partial<GenerationLog>): Promise<GenerationLog>
         status: log.status || "success",
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        tasks: log.tasks || [],
+        error: log.error,
     };
+}
+
+function resultsFromLog(log: GenerationLog): GenerationResult[] {
+    const imagesBySlot = new Map(log.images.map((image, index) => [image.slot ?? index, image]));
+    return Array.from({ length: Math.max(1, log.imageCount) }, (_, slot) => {
+        const image = imagesBySlot.get(slot);
+        return image ? { id: image.id, status: "success" as const, image } : { id: `${log.id}-${slot}`, status: "failed" as const, error: log.error || i18n.t("workbench.generationFailed") };
+    });
 }
 
 function serializeLog(log: GenerationLog): GenerationLog {
@@ -834,14 +960,46 @@ function serializeLog(log: GenerationLog): GenerationLog {
     };
 }
 
+async function attachTaskToLog(logId: string, slot: number, task: SuperTokenTaskRecord) {
+    const update = async () => {
+        const log = await logStore.getItem<GenerationLog>(logId);
+        if (!log || log.status !== "pending") return;
+        const tasks = [...(log.tasks || []).filter((item) => item.slot !== slot), { slot, task }].sort((a, b) => a.slot - b.slot);
+        await logStore.setItem(logId, { ...log, tasks });
+    };
+    const locks = (navigator as Navigator & { locks?: { request: <T>(name: string, callback: () => Promise<T>) => Promise<T> } }).locks;
+    if (locks) await locks.request(`image-log:${logId}`, update);
+    else await update();
+}
+
 function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
     return {
         model: log.config?.model || log.model || "",
         imageModel: log.config?.imageModel || log.model || "",
         quality: log.config?.quality || log.quality || "",
+        imageResolution: log.config?.imageResolution || "1K",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
     };
+}
+
+function superTokenImageSelectionError(config: AiConfig, model: string, references: ReferenceImage[]) {
+    const requestConfig = resolveModelRequestConfig(config, model);
+    if (requestConfig.provider !== "supertoken") return "";
+    const capability = superTokenImageCapability(requestConfig.model);
+    if (!capability) return i18n.t("imageWorkbench.invalidParams");
+    if (references.length > capability.maxImages) return `当前模型最多支持 ${capability.maxImages} 张参考图`;
+    if (references.length && !capability.operations.includes("edit")) return "当前模型不支持图生图";
+    if (!references.length && !capability.operations.includes("generation")) return "当前模型不支持文生图";
+    if (!capability.qualities.includes(config.quality || "auto")) return "当前模型不支持所选图片质量";
+    if (capability.resolutions && !capability.resolutions.includes(config.imageResolution)) return "当前模型不支持所选图片分辨率";
+    if (capability.aspectRatios && !capability.aspectRatios.includes(config.size)) return "当前模型不支持所选图片比例";
+    if (requestConfig.model.startsWith("gemini-") && config.background === "transparent") return "当前模型不支持透明背景";
+    return "";
+}
+
+function isPollingCanceled(error: unknown) {
+    return error instanceof Error && (error.name === "AbortError" || error.name === "CanceledError");
 }
 
 function moveListItem<T>(items: T[], index: number, offset: number) {
@@ -863,6 +1021,8 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
 }
 
 function buildLog({
+    id,
+    createdAt,
     prompt,
     model,
     config,
@@ -872,7 +1032,11 @@ function buildLog({
     failCount,
     status,
     images,
+    tasks,
+    error,
 }: {
+    id?: string;
+    createdAt?: number;
     prompt: string;
     model: string;
     config: GenerationLogConfig;
@@ -882,17 +1046,20 @@ function buildLog({
     failCount: number;
     status: GenerationLog["status"];
     images: GeneratedImage[];
+    tasks?: Array<{ slot: number; task: SuperTokenTaskRecord }>;
+    error?: string;
 }): GenerationLog {
     const logConfig = {
         model: config.model,
         imageModel: config.imageModel,
         quality: config.quality,
+        imageResolution: config.imageResolution,
         size: config.size,
         count: config.count,
     };
     return {
-        id: nanoid(),
-        createdAt: Date.now(),
+        id: id || nanoid(),
+        createdAt: createdAt || Date.now(),
         title: prompt.slice(0, 12) || i18n.t("workbench.untitled"),
         prompt,
         time: new Date().toLocaleString(i18n.resolvedLanguage, { hour12: false }),
@@ -908,5 +1075,7 @@ function buildLog({
         status,
         images,
         thumbnails: images.map((image) => image.dataUrl).filter(Boolean),
+        tasks,
+        error,
     };
 }

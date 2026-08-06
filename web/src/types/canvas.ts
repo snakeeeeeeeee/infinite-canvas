@@ -38,12 +38,16 @@ export type CanvasNodeMetadata = {
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;
     quality?: string;
+    imageResolution?: string;
     background?: string;
     count?: number;
     seconds?: string;
     vquality?: string;
     generateAudio?: string;
     watermark?: string;
+    videoReferenceMode?: "frame" | "images" | "media";
+    asyncTaskId?: string;
+    asyncOriginNodeId?: string;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;

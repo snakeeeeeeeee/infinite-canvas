@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
@@ -13,12 +13,13 @@ import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeVa
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_VIDEO_MIME_TYPES } from "@/lib/seedance-video";
+import { normalizeSuperTokenReferenceMode, superTokenVideoCapability, superTokenVideoResolutions, validateSuperTokenVideoSelection, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
-import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, resolveModelRequestConfig, superTokenVideoConfigPatch, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -63,7 +64,7 @@ type GenerationLog = {
     error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -76,6 +77,7 @@ export default function VideoPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const dragDepthRef = useRef(0);
     const activeLogIdsRef = useRef<Set<string>>(new Set());
+    const pollingControllersRef = useRef<Set<AbortController>>(new Set());
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -107,7 +109,10 @@ export default function VideoPage() {
     const agentTaskIdRef = useRef<string | undefined>(undefined);
 
     const model = effectiveConfig.videoModel || effectiveConfig.model;
-    const canGenerate = Boolean(prompt.trim());
+    const selectedVideoConfig = buildVideoConfig(effectiveConfig, model);
+    const referencePresentation = superTokenReferencePresentation(selectedVideoConfig);
+    const currentSelectionError = videoSelectionError(selectedVideoConfig, references, videoReferences, audioReferences);
+    const canGenerate = Boolean(prompt.trim()) && !currentSelectionError;
 
     useEffect(() => {
         if (!running || !startedAt) return;
@@ -210,16 +215,26 @@ export default function VideoPage() {
         setResults([{ id: nanoid(), status: "pending" }]);
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
+        const pollingController = new AbortController();
+        pollingControllersRef.current.add(pollingController);
+        const logId = nanoid();
+        const createdAt = Date.now();
+        const pendingLog = buildLog({ id: logId, createdAt, prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "pending" });
         try {
-            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences);
-            const log = buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "pending", task });
+            const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, {
+                signal: pollingController.signal,
+                context: { target: "video-workbench", logId },
+                onTaskCreated: (superTokenTask) => saveLog({ ...pendingLog, task: { id: superTokenTask.id, provider: "supertoken", model: snapshot.config.model, superTokenTask } }, false),
+            });
+            const log = { ...pendingLog, task };
             await saveLog(log, false);
-            void pollGenerationLog(log, snapshot.config, agentTaskId);
+            void pollGenerationLog(log, snapshot.config, agentTaskId, pollingController);
         } catch (error) {
+            pollingControllersRef.current.delete(pollingController);
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
             setResults([{ id: nanoid(), status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
-            await saveLog(buildLog({ prompt: snapshot.text, model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: performance.now() - batchStartedAt, status: "failed", error: errorMessage }));
+            await saveLog({ ...pendingLog, status: "failed", durationMs: performance.now() - batchStartedAt, error: errorMessage });
             message.error(errorMessage);
             setRunning(false);
         }
@@ -258,12 +273,14 @@ export default function VideoPage() {
             openConfigDialog(true);
             return null;
         }
-        const videoReferenceError = seedanceVideoReferenceError(videoReferences);
+        const requestConfig = buildVideoConfig(effectiveConfig, model);
+        const videoReferenceError = videoSelectionError(requestConfig, references, videoReferences, audioReferences);
         if (videoReferenceError) {
-            message.error(t("videoWorkbench.referenceError", { error: videoReferenceError, hint: seedanceVideoReferenceHint() }));
+            const hint = resolveModelRequestConfig(requestConfig, requestConfig.model).provider === "supertoken" ? "" : seedanceVideoReferenceHint();
+            message.error(hint ? t("videoWorkbench.referenceError", { error: videoReferenceError, hint }) : videoReferenceError);
             return null;
         }
-        return { text, config: buildVideoConfig(effectiveConfig, model), references: [...references], videoReferences: [...videoReferences], audioReferences: [...audioReferences] };
+        return { text, config: requestConfig, references: [...references], videoReferences: [...videoReferences], audioReferences: [...audioReferences] };
     };
 
     const retryResult = () => {
@@ -343,16 +360,18 @@ export default function VideoPage() {
         }
     };
 
-    const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig, agentTaskId?: string) => {
+    const pollGenerationLog = async (log: GenerationLog, configOverride?: AiConfig, agentTaskId?: string, externalController?: AbortController) => {
         if (!log.task || activeLogIdsRef.current.has(log.id)) return;
+        const pollingController = externalController || new AbortController();
         activeLogIdsRef.current.add(log.id);
+        pollingControllersRef.current.add(pollingController);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
         setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
         try {
             for (let attempt = 0; attempt < 120; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task);
+                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task, { signal: pollingController.signal });
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
                     const nextVideo: GeneratedVideo = {
@@ -372,10 +391,24 @@ export default function VideoPage() {
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
-                if (attempt === 119) throw new Error(t("videoWorkbench.timeout"));
-                await delay(log.task.provider === "seedance" ? 5000 : 2500);
+                if (attempt === 119) {
+                    if (log.task.provider === "supertoken") {
+                        await saveLog({ ...log, status: "pending", error: t("videoWorkbench.pollingPaused") }, false);
+                        message.warning(t("videoWorkbench.pollingPaused"));
+                        return;
+                    }
+                    throw new Error(t("videoWorkbench.timeout"));
+                }
+                await delay(state.status === "pending" && state.retryAfterMs ? state.retryAfterMs : log.task.provider === "seedance" ? 5000 : 2500, pollingController.signal);
             }
         } catch (error) {
+            if (isPollingCanceled(error) && log.task.provider === "supertoken") {
+                setResults([{ id: log.id, status: "pending" }]);
+                if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("workbench.pollingPaused") });
+                await saveLog({ ...log, status: "pending", error: t("workbench.pollingPaused") }, false);
+                message.warning(t("workbench.pollingPaused"));
+                return;
+            }
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
             setResults([{ id: log.id, status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
@@ -383,12 +416,15 @@ export default function VideoPage() {
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
+            pollingControllersRef.current.delete(pollingController);
             if (!activeLogIdsRef.current.size) {
                 setRunning(false);
                 setStartedAt(0);
             }
         }
     };
+
+    const stopPolling = () => pollingControllersRef.current.forEach((controller) => controller.abort());
 
     const previewGenerationLog = (log: GenerationLog) => {
         setPreviewLog(log);
@@ -403,7 +439,9 @@ export default function VideoPage() {
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
+        if (log.config.videoReferenceMode) updateConfig("videoReferenceMode", log.config.videoReferenceMode);
         setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
+        if (log.status === "pending" && log.task) void pollGenerationLog(log);
     };
 
     return (
@@ -456,7 +494,7 @@ export default function VideoPage() {
                                     </div>
                                 </div>
                                 <div
-                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referenceDragTarget === "image" ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referencePresentation && references.length > referencePresentation.images ? "border-red-400 bg-red-50/40 dark:border-red-800 dark:bg-red-950/20" : referenceDragTarget === "image" ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
                                     onDragEnter={(event) => handleReferenceDragEnter(event, "image")}
                                     onDragOver={(event) => {
                                         event.preventDefault();
@@ -468,14 +506,19 @@ export default function VideoPage() {
                                     {references.map((item, index) => (
                                         <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
                                             <img src={item.dataUrl} alt={item.name} className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{seedanceReferenceLabel("image", index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{videoImageReferenceLabel(referencePresentation?.mode, index)}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button type="button" className="absolute right-1 top-1 hidden size-6 items-center justify-center rounded bg-black/60 text-white group-hover:flex" onClick={() => setReferences((value) => value.filter((ref) => ref.id !== item.id))} aria-label={t("videoWorkbench.removeImage")}>
                                                 <Trash2 className="size-3.5" />
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget === "image" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
+                                    {referencePresentation?.mode === "frame"
+                                        ? Array.from({ length: Math.max(0, referencePresentation.images - references.length) }, (_, offset) => {
+                                              const index = references.length + offset;
+                                              return <div key={`frame-slot-${index}`} className="grid size-20 shrink-0 place-items-center rounded-md border border-dashed border-stone-300 text-xs text-stone-500 dark:border-stone-700">{videoImageReferenceLabel("frame", index)}</div>;
+                                          })
+                                        : !references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{referenceDragTarget === "image" ? t("videoWorkbench.dropReferences") : t("videoWorkbench.noImages")}</div> : null}
                                 </div>
                             </div>
 
@@ -487,7 +530,7 @@ export default function VideoPage() {
                                     </Button>
                                 </div>
                                 <div
-                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referenceDragTarget === "video" ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referencePresentation && videoReferences.length > referencePresentation.videos ? "border-red-400 bg-red-50/40 dark:border-red-800 dark:bg-red-950/20" : referenceDragTarget === "video" ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
                                     onDragEnter={(event) => handleReferenceDragEnter(event, "video")}
                                     onDragOver={(event) => {
                                         event.preventDefault();
@@ -518,7 +561,7 @@ export default function VideoPage() {
                                     </Button>
                                 </div>
                                 <div
-                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referenceDragTarget === "audio" ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
+                                    className={`hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed p-2 pb-3 overscroll-x-contain transition-colors ${referencePresentation && audioReferences.length > referencePresentation.audios ? "border-red-400 bg-red-50/40 dark:border-red-800 dark:bg-red-950/20" : referenceDragTarget === "audio" ? "border-stone-900 bg-stone-100/80 dark:border-stone-100 dark:bg-stone-900/80" : "border-stone-300 dark:border-stone-700"}`}
                                     onDragEnter={(event) => handleReferenceDragEnter(event, "audio")}
                                     onDragOver={(event) => {
                                         event.preventDefault();
@@ -545,9 +588,11 @@ export default function VideoPage() {
                                 </div>
                             </div>
 
+                            {currentSelectionError ? <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">{currentSelectionError}</div> : null}
+
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(effectiveConfig.vquality)}p · {videoSizeLabel(effectiveConfig.size)} · {normalizeVideoSeconds(effectiveConfig.videoSeconds)}s
+                                    {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(selectedVideoConfig.vquality)}p · {videoSizeLabel(selectedVideoConfig.size)} · {normalizeVideoSeconds(selectedVideoConfig.videoSeconds)}s
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -560,9 +605,11 @@ export default function VideoPage() {
                         </div>
 
                         <div className="mt-auto pt-6">
-                            <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {t("workbench.generate")}
-                            </Button>
+                            {running && resolveModelRequestConfig(effectiveConfig, model).provider === "supertoken" ? (
+                                <Button danger size="large" block icon={<Square className="size-4" />} onClick={stopPolling}>{t("workbench.stopPolling")}</Button>
+                            ) : (
+                                <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>{t("workbench.generate")}</Button>
+                            )}
                         </div>
                     </div>
 
@@ -615,15 +662,24 @@ export default function VideoPage() {
 function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
+    const updateConfigPatch = useConfigStore((state) => state.updateConfigPatch);
+    const normalizedConfig = { ...config, model, ...(superTokenVideoConfigPatch(config, model) || {}) };
 
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker
+                    config={normalizedConfig}
+                    value={model}
+                    onChange={(value) => updateConfigPatch({ videoModel: value, ...(superTokenVideoConfigPatch(config, value, true) || {}) })}
+                    capability="video"
+                    fullWidth
+                    onMissingConfig={() => openConfigDialog(false)}
+                />
             </label>
             <div className="col-span-2">
-                <VideoSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
+                <VideoSettingsPanel config={normalizedConfig} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
             </div>
         </>
     );
@@ -878,10 +934,11 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         videoSeconds: log.config?.videoSeconds || log.seconds || "",
         videoGenerateAudio: log.config?.videoGenerateAudio || "true",
         videoWatermark: log.config?.videoWatermark || "false",
+        videoReferenceMode: log.config?.videoReferenceMode || "frame",
     };
 }
 
-function buildLog({ prompt, model, config, references, videoReferences, audioReferences, durationMs, status, task, video, error }: { prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; durationMs: number; status: GenerationLog["status"]; task?: VideoGenerationTask; video?: GeneratedVideo; error?: string }): GenerationLog {
+function buildLog({ id, createdAt, prompt, model, config, references, videoReferences, audioReferences, durationMs, status, task, video, error }: { id?: string; createdAt?: number; prompt: string; model: string; config: AiConfig; references: ReferenceImage[]; videoReferences: ReferenceVideo[]; audioReferences: ReferenceAudio[]; durationMs: number; status: GenerationLog["status"]; task?: VideoGenerationTask; video?: GeneratedVideo; error?: string }): GenerationLog {
     const logConfig = {
         model: config.model,
         videoModel: config.videoModel,
@@ -890,10 +947,11 @@ function buildLog({ prompt, model, config, references, videoReferences, audioRef
         videoSeconds: config.videoSeconds,
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
+        videoReferenceMode: config.videoReferenceMode,
     };
     return {
-        id: nanoid(),
-        createdAt: Date.now(),
+        id: id || nanoid(),
+        createdAt: createdAt || Date.now(),
         title: prompt.slice(0, 12) || i18n.t("workbench.untitled"),
         prompt,
         time: new Date().toLocaleString(i18n.resolvedLanguage, { hour12: false }),
@@ -915,16 +973,18 @@ function buildLog({ prompt, model, config, references, videoReferences, audioRef
 
 function buildVideoConfig(config: AiConfig, model: string): AiConfig {
     const seedance = isSeedanceVideoConfig({ ...config, model });
-    return {
+    const superToken = resolveModelRequestConfig(config, model).provider === "supertoken";
+    const result = {
         ...config,
         model,
         videoModel: model,
-        size: seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
+        size: superToken ? config.size : seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
         videoSeconds: normalizeVideoSeconds(config.videoSeconds),
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
     };
+    return { ...result, ...(superTokenVideoConfigPatch(result, model) || {}) };
 }
 
 function normalizeVideoSeconds(value: string) {
@@ -941,6 +1001,61 @@ function normalizeResolution(value: string) {
     return normalizeVideoResolutionValue(value);
 }
 
-function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function superTokenReferencePresentation(config: AiConfig) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    if (requestConfig.provider !== "supertoken") return null;
+    const capability = superTokenVideoCapability(requestConfig.model);
+    if (!capability) return null;
+    const mode = normalizeSuperTokenReferenceMode(capability, config.videoReferenceMode);
+    return { mode, ...(capability.referenceModes[mode] || { images: 0, videos: 0, audios: 0, total: 0 }) };
+}
+
+function videoSelectionError(config: AiConfig, images: ReferenceImage[], videos: ReferenceVideo[], audios: ReferenceAudio[]) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    if (requestConfig.provider !== "supertoken") return seedanceVideoReferenceError(videos);
+    const capability = superTokenVideoCapability(requestConfig.model);
+    if (!capability) return i18n.t("videoWorkbench.unsupportedModel");
+    const resolution = `${normalizeVideoResolutionValue(config.vquality)}p`;
+    if (!superTokenVideoResolutions(capability.family, requestConfig.availableVideoModels).includes(resolution)) return i18n.t("settingsPanels.video.invalidResolution");
+    const mode = normalizeSuperTokenReferenceMode(capability, config.videoReferenceMode);
+    return validateSuperTokenVideoSelection({
+        capability,
+        duration: Math.floor(Number(config.videoSeconds) || capability.duration.min),
+        aspectRatio: superTokenAspectRatio(config.size),
+        referenceMode: mode,
+        images: images.length,
+        videos: videos.length,
+        audios: audios.length,
+        generateAudio: capability.audioPolicy === "required" ? true : capability.audioPolicy === "unsupported" ? false : boolConfig(config.videoGenerateAudio, true),
+    });
+}
+
+function superTokenAspectRatio(value: string) {
+    if (/^\d+:\d+$/.test(value)) return value;
+    const dimensions = value.match(/^(\d+)x(\d+)$/);
+    if (!dimensions) return "16:9";
+    const width = Number(dimensions[1]);
+    const height = Number(dimensions[2]);
+    if (width === height) return "1:1";
+    return width > height ? "16:9" : "9:16";
+}
+
+function videoImageReferenceLabel(mode: SuperTokenReferenceMode | undefined, index: number) {
+    if (mode === "frame") return index === 0 ? i18n.t("videoWorkbench.startFrame") : index === 1 ? i18n.t("videoWorkbench.endFrame") : seedanceReferenceLabel("image", index);
+    return seedanceReferenceLabel("image", index);
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
+        const timer = window.setTimeout(resolve, ms);
+        signal?.addEventListener("abort", () => {
+            window.clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+    });
+}
+
+function isPollingCanceled(error: unknown) {
+    return error instanceof Error && (error.name === "AbortError" || error.name === "CanceledError");
 }

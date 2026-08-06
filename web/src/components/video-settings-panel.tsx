@@ -1,12 +1,13 @@
 import { type ReactNode } from "react";
-import { Switch } from "antd";
+import { Segmented, Slider, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { type AiConfig } from "@/stores/use-config-store";
+import { normalizeSuperTokenVideoSettings, superTokenVideoCapability, superTokenVideoResolutions, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
+import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
@@ -31,7 +32,7 @@ export const videoSecondOptions = secondOptions.map((value) => String(value));
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark", value: string) => void;
+    onConfigChange: (key: "vquality" | "size" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -39,6 +40,10 @@ type VideoSettingsPanelProps = {
 
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5" }: VideoSettingsPanelProps) {
     const { t } = useTranslation();
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    if (requestConfig.provider === "supertoken") {
+        return <SuperTokenVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
+    }
     if (isSeedanceVideoConfig(config)) {
         return <SeedanceVideoSettingsPanel config={config} onConfigChange={onConfigChange} theme={theme} showTitle={showTitle} className={className} />;
     }
@@ -103,6 +108,93 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <NumberInput value={seconds} min={1} max={20} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
                     </div>
                 </SettingGroup>
+            </div>
+        </ImageSettingsTheme>
+    );
+}
+
+function SuperTokenVideoSettingsPanel({ config, onConfigChange, theme, showTitle, className }: VideoSettingsPanelProps) {
+    const { t } = useTranslation();
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    const capability = superTokenVideoCapability(requestConfig.model);
+    if (requestConfig.provider !== "supertoken" || !capability) return null;
+
+    const resolutions = superTokenVideoResolutions(capability.family, requestConfig.availableVideoModels);
+    const settings = normalizeSuperTokenVideoSettings(capability, resolutions, {
+        resolution: config.vquality,
+        aspectRatio: config.size,
+        duration: Number(config.videoSeconds),
+        referenceMode: config.videoReferenceMode,
+        generateAudio: boolConfig(config.videoGenerateAudio, true),
+    });
+    const resolution = settings.resolution;
+    const seconds = settings.duration;
+    const ratio = settings.aspectRatio;
+    const modes = (Object.keys(capability.referenceModes) as SuperTokenReferenceMode[]).filter((mode) => Boolean(capability.referenceModes[mode]));
+    const referenceMode = settings.referenceMode;
+    const generateAudio = settings.generateAudio;
+    const configError = superTokenConfigError(capability, resolutions, resolution, seconds, ratio, referenceMode);
+    const durationValues = capability.duration.values;
+
+    return (
+        <ImageSettingsTheme theme={theme}>
+            <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
+                {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.video.title")}</div> : null}
+                <SettingGroup title={t("settingsPanels.video.resolution")} color={theme.node.muted}>
+                    <Segmented
+                        block
+                        value={resolution}
+                        options={resolutions.map((value) => ({ label: value, value }))}
+                        onChange={(value) => onConfigChange("vquality", String(value).replace(/p$/i, ""))}
+                    />
+                    {!resolutions.length ? <InlineWarning>{t("settingsPanels.video.noResolution")}</InlineWarning> : null}
+                </SettingGroup>
+                <SettingGroup title={t("settingsPanels.video.ratio")} color={theme.node.muted}>
+                    <div className="grid grid-cols-3 gap-2.5">
+                        {capability.aspectRatios.map((value) => (
+                            <button
+                                key={value}
+                                type="button"
+                                className="flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-md border bg-transparent text-sm transition hover:opacity-80"
+                                style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={() => onConfigChange("size", value)}
+                            >
+                                <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
+                                <span>{value}</span>
+                            </button>
+                        ))}
+                    </div>
+                </SettingGroup>
+                <SettingGroup title={t("settingsPanels.video.duration")} color={theme.node.muted}>
+                    {durationValues ? (
+                        <Segmented block value={seconds} options={durationValues.map((value) => ({ label: `${value}s`, value }))} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
+                    ) : (
+                        <div className="grid grid-cols-[minmax(0,1fr)_72px] items-center gap-3">
+                            <Slider min={capability.duration.min} max={capability.duration.max} value={seconds} tooltip={{ formatter: (value) => `${value}s` }} onChange={(value) => onConfigChange("videoSeconds", String(value))} />
+                            <NumberInput value={String(seconds)} min={capability.duration.min} max={capability.duration.max} theme={theme} onChange={(value) => onConfigChange("videoSeconds", value)} />
+                        </div>
+                    )}
+                </SettingGroup>
+                <SettingGroup title={t("settingsPanels.video.referenceMode")} color={theme.node.muted}>
+                    <Segmented
+                        block
+                        value={referenceMode}
+                        options={modes.map((value) => ({ label: t(`settingsPanels.video.referenceModes.${value}`), value }))}
+                        onChange={(value) => onConfigChange("videoReferenceMode", String(value))}
+                    />
+                    <div className="text-xs leading-5" style={{ color: theme.node.muted }}>
+                        {referenceModeHint(referenceMode, capability.referenceModes[referenceMode])}
+                    </div>
+                </SettingGroup>
+                {capability.audioPolicy !== "unsupported" ? (
+                    <SettingGroup title={t("settingsPanels.video.output")} color={theme.node.muted}>
+                        <div className="grid gap-2 rounded-md border p-2.5" style={{ borderColor: theme.node.stroke }}>
+                            <SwitchRow label={capability.audioPolicy === "required" ? t("settingsPanels.video.audioRequired") : t("settingsPanels.video.generateAudio")} checked={generateAudio} disabled={capability.audioPolicy === "required"} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} />
+                        </div>
+                    </SettingGroup>
+                ) : null}
+                {configError ? <InlineWarning>{configError}</InlineWarning> : null}
             </div>
         </ImageSettingsTheme>
     );
@@ -261,17 +353,43 @@ function ratioPreview(ratio: string) {
     return { width: 16, height: 9 };
 }
 
-function SwitchRow({ label, checked, theme, onChange }: { label: string; checked: boolean; theme: CanvasTheme; onChange: (checked: boolean) => void }) {
+function SwitchRow({ label, checked, disabled = false, theme, onChange }: { label: string; checked: boolean; disabled?: boolean; theme: CanvasTheme; onChange: (checked: boolean) => void }) {
     return (
         <div className="flex h-8 items-center justify-between gap-3">
             <span className="text-sm" style={{ color: theme.node.text }}>
                 {label}
             </span>
             <span onMouseDown={(event) => event.stopPropagation()}>
-                <Switch size="small" checked={checked} onChange={onChange} />
+                <Switch size="small" checked={checked} disabled={disabled} onChange={onChange} />
             </span>
         </div>
     );
+}
+
+function superTokenConfigError(
+    capability: NonNullable<ReturnType<typeof superTokenVideoCapability>>,
+    resolutions: string[],
+    resolution: string,
+    seconds: number,
+    ratio: string,
+    referenceMode: SuperTokenReferenceMode,
+) {
+    if (!resolutions.includes(resolution)) return i18n.t("settingsPanels.video.invalidResolution");
+    if (capability.duration.values ? !capability.duration.values.includes(seconds) : seconds < capability.duration.min || seconds > capability.duration.max) return i18n.t("settingsPanels.video.invalidDuration");
+    if (!capability.aspectRatios.includes(ratio)) return i18n.t("settingsPanels.video.invalidRatio");
+    if (!capability.referenceModes[referenceMode]) return i18n.t("settingsPanels.video.invalidReferenceMode");
+    return "";
+}
+
+function referenceModeHint(mode: SuperTokenReferenceMode, limits?: { images: number; videos: number; audios: number; total?: number }) {
+    if (!limits) return "";
+    if (mode === "frame") return i18n.t("settingsPanels.video.frameHint", { count: limits.images });
+    if (mode === "images") return i18n.t("settingsPanels.video.imagesHint", { count: limits.images });
+    return i18n.t("settingsPanels.video.mediaHint", { images: limits.images, videos: limits.videos, audios: limits.audios, total: limits.total || limits.images + limits.videos + limits.audios });
+}
+
+function InlineWarning({ children }: { children: ReactNode }) {
+    return <div className="rounded-md border border-red-300/70 bg-red-500/5 px-2.5 py-2 text-xs leading-5 text-red-600 dark:border-red-900 dark:text-red-300">{children}</div>;
 }
 
 function readSizeDimensions(size: string) {

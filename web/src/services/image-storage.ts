@@ -16,14 +16,25 @@ export type UploadedImage = {
 const store = localforage.createInstance({ name: "infinite-canvas", storeName: "image_files" });
 const objectUrls = new Map<string, string>();
 
-export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
+export async function uploadImage(input: string | Blob, preferredStorageKey?: string): Promise<UploadedImage> {
     const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
-    const storageKey = `image:${nanoid()}`;
+    const storageKey = preferredStorageKey || `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
+    const previousUrl = objectUrls.get(storageKey);
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
     const url = URL.createObjectURL(blob);
     objectUrls.set(storageKey, url);
     const meta = await readImageMeta(url);
     return { url, storageKey, width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || meta.mimeType };
+}
+
+export async function storeGeneratedImage(image: { dataUrl: string; storageKey?: string; width?: number; height?: number; bytes?: number; mimeType?: string }): Promise<UploadedImage> {
+    if (!image.storageKey) return uploadImage(image.dataUrl);
+    const blob = await store.getItem<Blob>(image.storageKey);
+    if (!blob) return uploadImage(image.dataUrl, image.storageKey);
+    const url = await resolveImageUrl(image.storageKey, image.dataUrl);
+    const meta = image.width && image.height ? { width: image.width, height: image.height } : await readImageMeta(url);
+    return { url, storageKey: image.storageKey, width: meta.width, height: meta.height, bytes: image.bytes ?? blob.size, mimeType: image.mimeType || blob.type || "image/png" };
 }
 
 export async function resolveImageUrl(storageKey?: string, fallback = "") {
