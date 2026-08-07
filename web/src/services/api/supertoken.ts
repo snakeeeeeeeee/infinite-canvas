@@ -3,6 +3,7 @@ import localforage from "localforage";
 import { nanoid } from "nanoid";
 
 import { dataUrlToFile } from "@/lib/image-utils";
+import { superTokenReferenceDurationError } from "@/lib/seedance-video";
 import {
     normalizeSuperTokenVideoSettings,
     resolveSuperTokenVideoModel,
@@ -215,6 +216,8 @@ export async function createSuperTokenVideoTask(
     if (!model) throw new Error("无法从当前账号模型列表解析对应的视频模型 SKU");
 
     const { referenceMode, duration, aspectRatio, generateAudio } = settings;
+    const referenceDurationError = superTokenReferenceDurationError(model, videoReferences, audioReferences);
+    if (referenceDurationError) throw new Error(referenceDurationError);
     const selectionError = validateSuperTokenVideoSelection({ capability, duration, aspectRatio, referenceMode, images: references.length, videos: videoReferences.length, audios: audioReferences.length, generateAudio });
     if (selectionError) throw new Error(selectionError);
 

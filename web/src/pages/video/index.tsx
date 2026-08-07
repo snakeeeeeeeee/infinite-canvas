@@ -13,7 +13,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
-import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_VIDEO_MIME_TYPES } from "@/lib/seedance-video";
+import { boolConfig, effectiveReferenceDurationMs, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, superTokenReferenceDurationError, superTokenReferenceDurationPolicy, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_REFERENCE_MAX_DURATION_MS, SEEDANCE_VIDEO_MIME_TYPES, type SuperTokenReferenceDurationPolicy } from "@/lib/seedance-video";
 import { normalizeSuperTokenReferenceMode, remainingSuperTokenReferenceCapacity, superTokenVideoCapability, superTokenVideoResolutions, validateSuperTokenVideoSelection, type SuperTokenReferenceLimits, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
@@ -162,6 +162,7 @@ export default function VideoPage() {
                 }),
             ),
             message.warning,
+            referenceAudioDurationPolicy(selectedVideoConfig),
         );
         setReferences((value) => [...value, ...nextReferences]);
         setVideoReferences((value) => [...value, ...nextVideoReferences]);
@@ -933,23 +934,25 @@ function acceptReferenceFiles(files: File[], current: ReferenceCounts, limits: A
     });
 }
 
-function filterAudioReferencesByDuration(existing: ReferenceAudio[], next: ReferenceAudio[], warn: (content: string) => void) {
-    let total = existing.reduce((sum, item) => sum + (item.durationMs || 0), 0);
+function filterAudioReferencesByDuration(existing: ReferenceAudio[], next: ReferenceAudio[], warn: (content: string) => void, policy: SuperTokenReferenceDurationPolicy = { minMs: 2000, maxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, normalizeAfterMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, normalizedTotalDurationMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, totalMaxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS }) {
+    const totalMaxMs = policy.totalMaxMs || policy.maxMs;
+    let total = existing.reduce((sum, item) => sum + effectiveReferenceDurationMs(item.durationMs || 0, policy), 0);
     const accepted: ReferenceAudio[] = [];
     let skipped = false;
     for (const item of next) {
-        if (item.durationMs && (item.durationMs < 2000 || item.durationMs > 15000)) {
+        if (item.durationMs && (item.durationMs < policy.minMs || item.durationMs > policy.maxMs)) {
             skipped = true;
             continue;
         }
-        if (item.durationMs && total + item.durationMs > 15000) {
+        const effectiveDurationMs = effectiveReferenceDurationMs(item.durationMs || 0, policy);
+        if (item.durationMs && total + effectiveDurationMs > totalMaxMs) {
             skipped = true;
             continue;
         }
-        total += item.durationMs || 0;
+        total += effectiveDurationMs;
         accepted.push(item);
     }
-    if (skipped) warn(i18n.t("videoWorkbench.audioDurationInvalid"));
+    if (skipped) warn(i18n.t("videoWorkbench.audioDurationInvalid", { min: policy.minMs / 1000, max: policy.maxMs / 1000, total: totalMaxMs / 1000 }));
     return accepted;
 }
 
@@ -1061,6 +1064,8 @@ function videoSelectionError(config: AiConfig, images: ReferenceImage[], videos:
     if (requestConfig.provider !== "supertoken") return seedanceVideoReferenceError(videos);
     const capability = superTokenVideoCapability(requestConfig.model);
     if (!capability) return i18n.t("videoWorkbench.unsupportedModel");
+    const durationError = superTokenReferenceDurationError(requestConfig.model, videos, audios);
+    if (durationError) return durationError;
     const resolution = `${normalizeVideoResolutionValue(config.vquality)}p`;
     if (!superTokenVideoResolutions(capability.family, requestConfig.availableVideoModels).includes(resolution)) return i18n.t("settingsPanels.video.invalidResolution");
     const mode = normalizeSuperTokenReferenceMode(capability, config.videoReferenceMode);
@@ -1074,6 +1079,11 @@ function videoSelectionError(config: AiConfig, images: ReferenceImage[], videos:
         audios: audios.length,
         generateAudio: capability.audioPolicy === "required" ? true : capability.audioPolicy === "unsupported" ? false : boolConfig(config.videoGenerateAudio, true),
     });
+}
+
+function referenceAudioDurationPolicy(config: AiConfig) {
+    const requestConfig = resolveModelRequestConfig(config, config.model || config.videoModel);
+    return requestConfig.provider === "supertoken" ? superTokenReferenceDurationPolicy(requestConfig.model, "audio") : undefined;
 }
 
 function superTokenAspectRatio(value: string) {

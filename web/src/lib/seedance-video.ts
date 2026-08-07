@@ -12,6 +12,9 @@ export const SEEDANCE_REFERENCE_LIMITS = {
     audioMaxBytes: 15 * 1024 * 1024,
 };
 export const SEEDANCE_VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime"];
+export const SEEDANCE_REFERENCE_MAX_DURATION_MS = 15_000;
+export const SEEDANCE_REFERENCE_DURATION_TOLERANCE_MS = 300;
+export type SuperTokenReferenceDurationPolicy = { minMs: number; maxMs: number; normalizeAfterMs: number; normalizedTotalDurationMs: number; totalMaxMs?: number };
 
 export const seedanceResolutionOptions = [
     { value: "480p", label: "480p" },
@@ -149,6 +152,35 @@ export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {
         }
     }
     if (totalDurationMs > 15000) return i18n.t("seedance.errors.totalDuration");
+    return "";
+}
+
+export function superTokenReferenceDurationPolicy(model: string, kind: "video" | "audio"): SuperTokenReferenceDurationPolicy | undefined {
+    if (model.startsWith("adobe-seedance-2.0")) return { minMs: 2000, maxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS + SEEDANCE_REFERENCE_DURATION_TOLERANCE_MS, normalizeAfterMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, normalizedTotalDurationMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, ...(kind === "audio" ? { totalMaxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS } : {}) };
+    if (model.startsWith("leonardo-seedance-2.0")) {
+        return kind === "video" ? { minMs: 3000, maxMs: 10300, normalizeAfterMs: 10000, normalizedTotalDurationMs: 10000, totalMaxMs: 15000 } : { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs: 15000 };
+    }
+    if (kind === "audio" && model.startsWith("leonardo-minimax-h3")) return { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs: 15000 };
+    return undefined;
+}
+
+export function effectiveReferenceDurationMs(durationMs: number, policy: SuperTokenReferenceDurationPolicy) {
+    return durationMs > policy.normalizeAfterMs && durationMs <= policy.maxMs ? policy.normalizedTotalDurationMs : durationMs;
+}
+
+export function superTokenReferenceDurationError(model: string, videos: ReferenceVideo[], audios: ReferenceAudio[]) {
+    const videoPolicy = superTokenReferenceDurationPolicy(model, "video");
+    const audioPolicy = superTokenReferenceDurationPolicy(model, "audio");
+    for (let index = 0; index < videos.length; index += 1) {
+        const durationMs = videos[index].durationMs;
+        if (durationMs && videoPolicy && (durationMs < videoPolicy.minMs || durationMs > videoPolicy.maxMs)) return i18n.t("seedance.errors.referenceDuration", { label: seedanceReferenceLabel("video", index), min: videoPolicy.minMs / 1000, max: videoPolicy.maxMs / 1000 });
+    }
+    for (let index = 0; index < audios.length; index += 1) {
+        const durationMs = audios[index].durationMs;
+        if (durationMs && audioPolicy && (durationMs < audioPolicy.minMs || durationMs > audioPolicy.maxMs)) return i18n.t("seedance.errors.referenceDuration", { label: seedanceReferenceLabel("audio", index), min: audioPolicy.minMs / 1000, max: audioPolicy.maxMs / 1000 });
+    }
+    if (videoPolicy?.totalMaxMs && videos.reduce((total, item) => total + effectiveReferenceDurationMs(item.durationMs || 0, videoPolicy), 0) > videoPolicy.totalMaxMs) return i18n.t("seedance.errors.totalDuration");
+    if (audioPolicy?.totalMaxMs && audios.reduce((total, item) => total + effectiveReferenceDurationMs(item.durationMs || 0, audioPolicy), 0) > audioPolicy.totalMaxMs) return i18n.t("seedance.errors.totalAudioDuration");
     return "";
 }
 

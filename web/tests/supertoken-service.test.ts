@@ -17,6 +17,7 @@ if (!("localStorage" in globalThis)) {
 }
 
 const { superTokenVideoCapability } = await import("../src/lib/supertoken-capabilities");
+const { superTokenReferenceDurationError } = await import("../src/lib/seedance-video");
 const {
     buildSuperTokenImageOutput,
     buildSuperTokenMediaUploadFiles,
@@ -27,6 +28,32 @@ const {
 } = await import("../src/services/api/supertoken");
 
 describe("SuperToken request mapping", () => {
+    test("accepts Adobe Seedance encoding tail variance and rejects material overruns", () => {
+        const video = (durationMs: number) => [{ id: "video-1", name: "motion.mp4", type: "video/mp4", url: "https://example.com/motion.mp4", durationMs }];
+        const audio = (durationMs: number) => [{ id: "audio-1", name: "music.mp3", type: "audio/mpeg", url: "https://example.com/music.mp3", durationMs }];
+
+        expect(superTokenReferenceDurationError("adobe-seedance-2.0-480p", video(15000), [])).toBe("");
+        expect(superTokenReferenceDurationError("adobe-seedance-2.0-480p", video(15093), audio(15093))).toBe("");
+        expect(superTokenReferenceDurationError("adobe-seedance-2.0-480p", video(15301), [])).toContain("15.3");
+        expect(superTokenReferenceDurationError("adobe-seedance-2.0-480p", [], audio(15301))).toContain("15.3");
+    });
+
+    test("uses Leonardo video and audio limits with normalized combined durations", () => {
+        const video = (durationMs: number, id = "video-1") => ({ id, name: `${id}.mp4`, type: "video/mp4", url: `https://example.com/${id}.mp4`, durationMs });
+        const audio = (durationMs: number, id = "audio-1") => ({ id, name: `${id}.mp3`, type: "audio/mpeg", url: `https://example.com/${id}.mp3`, durationMs });
+        const model = "leonardo-seedance-2.0-fast-480p";
+
+        expect(superTokenReferenceDurationError(model, [video(10000)], [audio(15000)])).toBe("");
+        expect(superTokenReferenceDurationError(model, [video(10093)], [audio(15093)])).toBe("");
+        expect(superTokenReferenceDurationError(model, [video(10301)], [])).toContain("10.3");
+        expect(superTokenReferenceDurationError(model, [], [audio(15301)])).toContain("15.3");
+        expect(superTokenReferenceDurationError(model, [video(5000), video(10093, "video-2")], [])).toBe("");
+        expect(superTokenReferenceDurationError(model, [video(5100), video(10093, "video-2")], [])).toContain("15");
+        expect(superTokenReferenceDurationError("leonardo-minimax-h3-1440p", [], [audio(15093)])).toBe("");
+        expect(superTokenReferenceDurationError("leonardo-minimax-h3-1440p", [], [audio(7500), audio(7500, "audio-2")])).toBe("");
+        expect(superTokenReferenceDurationError("leonardo-minimax-h3-1440p", [], [audio(7600), audio(7500, "audio-2")])).toContain("15");
+    });
+
     test("maps Gemini image output to async task fields", () => {
         expect(
             buildSuperTokenImageOutput("gemini-3.1-flash-image", {
