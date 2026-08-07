@@ -21,6 +21,7 @@ const {
     buildSuperTokenImageOutput,
     buildSuperTokenMediaUploadFiles,
     buildSuperTokenVideoPayload,
+    mergeSuperTokenTaskProgress,
     parseSuperTokenRetryAfter,
     superTokenImageSlotIdempotencyKey,
 } = await import("../src/services/api/supertoken");
@@ -130,6 +131,20 @@ describe("SuperToken request mapping", () => {
 });
 
 describe("SuperToken async controls", () => {
+    test("keeps known task progress monotonic and clamps pending values", () => {
+        expect(mergeSuperTokenTaskProgress({ progress: 64, progressKnown: true }, { status: "in_progress", progress: 28, progress_known: true })).toEqual({ progress: 64, progressKnown: true });
+        expect(mergeSuperTokenTaskProgress({ progress: 64, progressKnown: true }, { status: "in_progress", progress: 120, progress_known: true })).toEqual({ progress: 99, progressKnown: true });
+    });
+
+    test("does not forget a previously known progress value", () => {
+        expect(mergeSuperTokenTaskProgress({ progress: 42, progressKnown: true }, { status: "in_progress", progress_known: false })).toEqual({ progress: 42, progressKnown: true });
+        expect(mergeSuperTokenTaskProgress({ progress: 0, progressKnown: false }, { status: "queued", progress: -10, progress_known: false })).toEqual({ progress: 0, progressKnown: false });
+    });
+
+    test("marks succeeded tasks as complete only after the remote terminal state", () => {
+        expect(mergeSuperTokenTaskProgress({ progress: 73, progressKnown: true }, { status: "succeeded", progress: 73, progress_known: true })).toEqual({ progress: 100, progressKnown: true });
+    });
+
     test("uses stable independent idempotency keys for image slots", () => {
         expect(superTokenImageSlotIdempotencyKey("log-1", 0)).toBe("canvas-image-log-1-0");
         expect(superTokenImageSlotIdempotencyKey("log-1", 1)).not.toBe(superTokenImageSlotIdempotencyKey("log-1", 0));

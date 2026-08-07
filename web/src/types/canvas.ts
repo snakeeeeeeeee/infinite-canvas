@@ -49,6 +49,8 @@ export type CanvasNodeMetadata = {
     asyncTaskId?: string;
     asyncOriginNodeId?: string;
     asyncResultNodeIds?: string[];
+    generationProgress?: number;
+    generationProgressKnown?: boolean;
     audioVoice?: string;
     audioFormat?: string;
     audioSpeed?: string;

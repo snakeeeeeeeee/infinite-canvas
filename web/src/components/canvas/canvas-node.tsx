@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ChevronRight, Group, Image as ImageIcon, Music2, Puzzle, RefreshCw, Star, Video } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
+import { GenerationProgress } from "@/components/generation-progress";
 import { formatBytes } from "@/lib/image-utils";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
@@ -443,7 +444,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node);
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading") return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading") return <LoadingContent node={props.node} theme={props.theme} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type as CanvasNodeType];
@@ -485,14 +486,9 @@ function GroupNodeContent({ node, theme, groupChildCount }: NodeContentRendererP
     );
 }
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
     const { t } = useTranslation();
-    return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
-            <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">{t("canvas.node.generating")}</span>
-        </div>
-    );
+    return <GenerationProgress compact progress={node.metadata?.generationProgress} progressKnown={node.metadata?.generationProgressKnown} label={t("canvas.node.generating")} accentColor={theme.node.activeStroke} surfaceColor={theme.node.fill} mutedColor={theme.node.muted} />;
 }
 
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
@@ -585,7 +581,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     if (!props.node.metadata?.content && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
-                <LoadingContent theme={props.theme} />
+                <LoadingContent node={props.node} theme={props.theme} />
             ) : props.node.metadata?.status === "error" ? (
                 <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
             ) : (

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload, VideoIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, Music2, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
@@ -7,6 +7,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
+import { GenerationProgress } from "@/components/generation-progress";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
@@ -41,6 +42,8 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     video?: GeneratedVideo;
     error?: string;
+    progress?: number;
+    progressKnown?: boolean;
 };
 
 type GenerationLog = {
@@ -230,7 +233,10 @@ export default function VideoPage() {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, {
                 signal: pollingController.signal,
                 context: { target: "video-workbench", logId },
-                onTaskCreated: (superTokenTask) => saveLog({ ...pendingLog, task: { id: superTokenTask.id, provider: "supertoken", model: snapshot.config.model, superTokenTask } }, false),
+                onTaskCreated: (superTokenTask) => {
+                    setResults((value) => updatePendingVideoProgress(value, superTokenTask.progress, superTokenTask.progressKnown, logId));
+                    return saveLog({ ...pendingLog, task: { id: superTokenTask.id, provider: "supertoken", model: snapshot.config.model, superTokenTask } }, false);
+                },
             });
             const log = { ...pendingLog, task };
             await saveLog(log, false);
@@ -383,11 +389,13 @@ export default function VideoPage() {
         pollingControllersRef.current.add(pollingController);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults((value) => (value.length ? value : [{ id: log.id, status: "pending" }]));
+        const initialProgress = videoTaskProgress(log.task);
+        setResults((value) => (value.length ? value.map((item) => (item.status === "pending" ? { ...item, ...initialProgress } : item)) : [{ id: log.id, status: "pending", ...initialProgress }]));
         const taskConfig = buildVideoConfig({ ...effectiveConfig, ...log.config }, log.task.model || log.model);
+        let currentLog = log;
         try {
             for (let attempt = 0; attempt < 120; attempt += 1) {
-                const state = await pollVideoGenerationTask(configOverride || taskConfig, log.task, { signal: pollingController.signal });
+                const state = await pollVideoGenerationTask(configOverride || taskConfig, currentLog.task!, { signal: pollingController.signal });
                 if (state.status === "completed") {
                     const stored = await storeGeneratedVideo(state.result);
                     const nextVideo: GeneratedVideo = {
@@ -402,33 +410,38 @@ export default function VideoPage() {
                     };
                     setResults([{ id: nextVideo.id, status: "success", video: nextVideo }]);
                     if (agentTaskId) updateAgentTask(agentTaskId, { status: "succeeded", successCount: 1, failCount: 0, error: undefined });
-                    await saveLog({ ...log, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
+                    await saveLog({ ...currentLog, status: "success", durationMs: nextVideo.durationMs, video: nextVideo, error: undefined });
                     message.success(t("videoWorkbench.generated"));
                     return;
                 }
                 if (state.status === "failed") throw new Error(state.error);
+                setResults((value) => updatePendingVideoProgress(value, state.progress, state.progressKnown, currentLog.id));
+                if (currentLog.task?.superTokenTask) {
+                    currentLog = { ...currentLog, task: { ...currentLog.task, superTokenTask: { ...currentLog.task.superTokenTask } } };
+                    await saveLog(currentLog, false);
+                }
                 if (attempt === 119) {
-                    if (log.task.provider === "supertoken") {
-                        await saveLog({ ...log, status: "pending", error: t("videoWorkbench.pollingPaused") }, false);
+                    if (currentLog.task!.provider === "supertoken") {
+                        await saveLog({ ...currentLog, status: "pending", error: t("videoWorkbench.pollingPaused") }, false);
                         message.warning(t("videoWorkbench.pollingPaused"));
                         return;
                     }
                     throw new Error(t("videoWorkbench.timeout"));
                 }
-                await delay(state.status === "pending" && state.retryAfterMs ? state.retryAfterMs : log.task.provider === "seedance" ? 5000 : 2500, pollingController.signal);
+                await delay(state.status === "pending" && state.retryAfterMs ? state.retryAfterMs : currentLog.task!.provider === "seedance" ? 5000 : 2500, pollingController.signal);
             }
         } catch (error) {
-            if (isPollingCanceled(error) && log.task.provider === "supertoken") {
-                setResults([{ id: log.id, status: "pending" }]);
+            if (isPollingCanceled(error) && currentLog.task!.provider === "supertoken") {
+                setResults([{ id: currentLog.id, status: "pending", ...videoTaskProgress(currentLog.task) }]);
                 if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: t("workbench.pollingPaused") });
-                await saveLog({ ...log, status: "pending", error: t("workbench.pollingPaused") }, false);
+                await saveLog({ ...currentLog, status: "pending", error: t("workbench.pollingPaused") }, false);
                 message.warning(t("workbench.pollingPaused"));
                 return;
             }
             const errorMessage = error instanceof Error ? error.message : t("workbench.generationFailed");
-            setResults([{ id: log.id, status: "failed", error: errorMessage }]);
+            setResults([{ id: currentLog.id, status: "failed", error: errorMessage }]);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", successCount: 0, failCount: 1, error: errorMessage });
-            await saveLog({ ...log, status: "failed", durationMs: Date.now() - log.createdAt, error: errorMessage });
+            await saveLog({ ...currentLog, status: "failed", durationMs: Date.now() - currentLog.createdAt, error: errorMessage });
             message.error(errorMessage);
         } finally {
             activeLogIdsRef.current.delete(log.id);
@@ -456,7 +469,7 @@ export default function VideoPage() {
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         if (log.config.videoReferenceMode) updateConfig("videoReferenceMode", log.config.videoReferenceMode);
-        setResults(log.status === "pending" ? [{ id: log.id, status: "pending" }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
+        setResults(log.status === "pending" ? [{ id: log.id, status: "pending", ...videoTaskProgress(log.task) }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
         if (log.status === "pending" && log.task) void pollGenerationLog(log);
     };
 
@@ -636,7 +649,7 @@ export default function VideoPage() {
                         </div>
                         {results.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} />))}
+                                {results.map((result) => (result.status === "success" && result.video ? <ResultVideoCard key={result.id} video={result.video} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} /> : result.status === "failed" ? <FailedVideoCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={retryResult} /> : <PendingVideoCard key={result.id} progress={result.progress} progressKnown={result.progressKnown} />))}
                             </div>
                         ) : (
                             <div className="flex min-h-[320px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 text-center dark:border-stone-700 lg:min-h-[560px]">
@@ -727,16 +740,18 @@ function ResultVideoCard({ video, onDownload, onSaveAsset }: { video: GeneratedV
     );
 }
 
-function PendingVideoCard() {
+function PendingVideoCard({ progress, progressKnown }: Pick<GenerationResult, "progress" | "progressKnown">) {
     const { t } = useTranslation();
-    return (
-        <div className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>{t("workbench.generating")}</span>
-            </div>
-        </div>
-    );
+    return <GenerationProgress className="aspect-video rounded-lg border border-stone-300 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200" progress={progress} progressKnown={progressKnown} label={t("workbench.generating")} />;
+}
+
+function videoTaskProgress(task?: VideoGenerationTask) {
+    return { progress: task?.superTokenTask?.progress, progressKnown: task?.superTokenTask?.progressKnown };
+}
+
+function updatePendingVideoProgress(results: GenerationResult[], progress?: number, progressKnown?: boolean, fallbackId = nanoid()) {
+    const next = { progress, progressKnown };
+    return results.length ? results.map((item) => (item.status === "pending" ? { ...item, ...next } : item)) : [{ id: fallbackId, status: "pending" as const, ...next }];
 }
 
 function FailedVideoCard({ error, onRetry }: { error: string; onRetry: () => void }) {

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, PenLine, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
@@ -6,6 +6,7 @@ import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { GenerationProgress } from "@/components/generation-progress";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
@@ -41,6 +42,8 @@ type GenerationResult = {
     status: "pending" | "success" | "failed";
     image?: GeneratedImage;
     error?: string;
+    progress?: number;
+    progressKnown?: boolean;
 };
 
 type GenerationLog = {
@@ -215,7 +218,7 @@ export default function ImagePage() {
             const hasDurableTasks = Boolean(pending?.tasks?.length);
             if (pending) await saveLog({ ...pending, status: hasDurableTasks ? "pending" : "failed", error: hasDurableTasks ? t("workbench.pollingPaused") : t("common.requestCanceled") }, false);
             if (agentTaskId) updateAgentTask(agentTaskId, { status: "failed", error: hasDurableTasks ? t("workbench.pollingPaused") : t("common.requestCanceled") });
-            if (hasDurableTasks) setResults((value) => value.map((item) => ({ id: item.id, status: "pending" })));
+            if (hasDurableTasks) setResults((value) => value.map((item) => ({ ...item, status: "pending", image: undefined, error: undefined })));
             message.warning(hasDurableTasks ? t("workbench.pollingPaused") : t("common.requestCanceled"));
             pollingControllersRef.current.delete(pollingController);
             setRunning(false);
@@ -356,14 +359,24 @@ export default function ImagePage() {
         pollingControllersRef.current.add(pollingController);
         setRunning(true);
         setStartedAt((value) => value || performance.now());
-        setResults(Array.from({ length: log.imageCount }, (_, index) => ({ id: `${log.id}-${index}`, status: "pending" })));
+        setResults(pendingResultsFromLog(log));
         try {
             const settled = await Promise.allSettled(
                 log.tasks.map(async ({ slot, task }) => {
                     const itemStartedAt = performance.now();
-                    const images = await resumeImageGenerationTask({ ...effectiveConfig, ...log.config, model: log.config.model || log.model }, task, { signal: pollingController.signal });
-                    if (!images.length) throw new Error(t("imageWorkbench.missingResult"));
                     const batchSize = Number(task.context?.batchSize) || Math.max(1, log.imageCount - slot);
+                    const images = await resumeImageGenerationTask(
+                        { ...effectiveConfig, ...log.config, model: log.config.model || log.model },
+                        task,
+                        {
+                            signal: pollingController.signal,
+                            onProgress: (progressTask) => {
+                                setResults((value) => updateResultProgress(value, slot, batchSize, progressTask));
+                                void attachTaskToLog(log.id, slot, progressTask);
+                            },
+                        },
+                    );
+                    if (!images.length) throw new Error(t("imageWorkbench.missingResult"));
                     return Promise.all(
                         images.slice(0, batchSize).map(async (image, index) => {
                             const imageSlot = slot + index;
@@ -409,7 +422,7 @@ export default function ImagePage() {
         if (log.config.imageResolution) updateConfig("imageResolution", log.config.imageResolution);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
-        setResults(log.status === "pending" ? Array.from({ length: log.imageCount }, (_, index) => ({ id: `${log.id}-${index}`, status: "pending" })) : resultsFromLog(log));
+        setResults(log.status === "pending" ? pendingResultsFromLog(log) : resultsFromLog(log));
     };
 
     const buildRequestSnapshot = () => {
@@ -440,7 +453,14 @@ export default function ImagePage() {
                       clientReferenceId: `${logId}-${startSlot}`,
                       context: { target: "image-workbench", logId, slot: startSlot, batchSize },
                       pollSignal,
-                      onTaskCreated: (task: SuperTokenTaskRecord) => attachTaskToLog(logId, startSlot, task),
+                      onTaskCreated: (task: SuperTokenTaskRecord) => {
+                          setResults((value) => updateResultProgress(value, startSlot, batchSize, task));
+                          return attachTaskToLog(logId, startSlot, task);
+                      },
+                      onProgress: (task: SuperTokenTaskRecord) => {
+                          setResults((value) => updateResultProgress(value, startSlot, batchSize, task));
+                          void attachTaskToLog(logId, startSlot, task);
+                      },
                   }
                 : undefined;
             const requestConfig = { ...snapshot.config, count: String(batchSize) };
@@ -652,7 +672,7 @@ export default function ImagePage() {
                                     ) : result.status === "failed" ? (
                                         <FailedImageCard key={result.id} error={result.error || t("workbench.generationFailed")} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} progress={result.progress} progressKnown={result.progressKnown} />
                                     ),
                                 )}
                             </div>
@@ -765,22 +785,10 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ progress, progressKnown }: Pick<GenerationResult, "progress" | "progressKnown">) {
     const { t } = useTranslation();
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div
-                className="absolute inset-0 opacity-60"
-                style={{
-                    backgroundImage: "radial-gradient(circle, rgba(120,113,108,0.35) 1.4px, transparent 1.6px)",
-                    backgroundSize: "16px 16px",
-                }}
-            />
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
-                <LoaderCircle className="size-6 animate-spin" />
-                <span>{t("workbench.generating")}</span>
-            </div>
-        </div>
+        <GenerationProgress className="aspect-square rounded-lg border border-stone-300 bg-stone-50 text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200" progress={progress} progressKnown={progressKnown} label={t("workbench.generating")} />
     );
 }
 
@@ -805,6 +813,10 @@ function FailedImageCard({ error, onRetry }: { error: string; onRetry: () => voi
 
 function updateResultAt(results: GenerationResult[], index: number, next: Partial<GenerationResult>) {
     return results.map((item, itemIndex) => (itemIndex === index ? { ...item, ...next } : item));
+}
+
+function updateResultProgress(results: GenerationResult[], startSlot: number, batchSize: number, task: SuperTokenTaskRecord) {
+    return results.map((item, index) => (index >= startSlot && index < startSlot + batchSize && item.status === "pending" ? { ...item, progress: task.progress, progressKnown: task.progressKnown } : item));
 }
 
 function LogPanel({
@@ -973,6 +985,13 @@ function resultsFromLog(log: GenerationLog): GenerationResult[] {
     return Array.from({ length: Math.max(1, log.imageCount) }, (_, slot) => {
         const image = imagesBySlot.get(slot);
         return image ? { id: image.id, status: "success" as const, image } : { id: `${log.id}-${slot}`, status: "failed" as const, error: log.error || i18n.t("workbench.generationFailed") };
+    });
+}
+
+function pendingResultsFromLog(log: GenerationLog): GenerationResult[] {
+    return Array.from({ length: log.imageCount }, (_, slot) => {
+        const taskEntry = log.tasks?.find(({ slot: startSlot, task }) => slot >= startSlot && slot < startSlot + (Number(task.context?.batchSize) || 1));
+        return { id: `${log.id}-${slot}`, status: "pending" as const, progress: taskEntry?.task.progress, progressKnown: taskEntry?.task.progressKnown };
     });
 }
 

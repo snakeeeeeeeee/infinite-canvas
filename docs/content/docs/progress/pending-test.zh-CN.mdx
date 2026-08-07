@@ -15,6 +15,8 @@ description: 当前版本已实现但仍需人工验证的变更项
 - SuperToken 视频：验证 `frame` 首尾帧、`images` 普通参考图和 `media` 图片/视频/音频分区；上传、拖放、剪贴板和资产选择器应立即采用当前模型与参考模式的数量上限，Leonardo Seedance 最多 4 图、3 视频、1 音频且图加视频合计 7 个；切换模型时，Kling 3.0 默认首尾帧，Kling Omni 与 MiniMax H3 默认多图参考，Seedance 默认混合素材；视频创作台与画布应保持一致，同时重置到账号可用最低分辨率、模型最短时长、默认比例和音轨设置；不兼容素材仍应保留、标红并阻止提交，不得静默删除。
 - SuperToken 视频同名素材：多个同标题画布节点应在任务请求中按顺序映射为 `image-N`、`video-N`、`audio-N`，不得改变素材顺序或上传文件名，也不得再返回 reference name 重复错误。
 - SuperToken 异步恢复：刷新图片工作台、视频工作台和画布后继续查询任务；网络错误、429、临时 5xx 和轮询超时不得伪装成服务端失败，多标签页不得重复落库结果。
+- SuperToken 生成进度：生图工作台、视频工作台和画布图片/视频节点应使用服务端 `progress` 平滑显影；仅 `progress_known=true` 时显示百分比，轮询返回更小值时不得倒退，未知进度只显示流动细线；刷新恢复、原生多图任务、拆分单图任务和失败重试应分别保持正确的槽位对应关系，结果完成后正常切换为媒体内容。
+- Docker 静态资源缓存：重新构建容器后访问 `/`、`/index.html` 和 `/config.js` 应返回 `no-store`；访问不存在的 `/assets/*.js` 必须返回 404 且正文不能是 `index.html`，真实带哈希资源应返回一年期 `immutable` 缓存。清理一次 Cloudflare 旧缓存后，新版本不应再因旧 HTML 引用失效哈希文件而白屏。
 - 已完成线上 R2 CORS 与真实链路验证：GPT Image 2 文生图/图生图、Adobe/Leonardo Seedance Fast `media`、Kling 3.0 首尾帧、Leonardo MiniMax H3 和 Canvas 刷新恢复均已走通。
 
 - 文档站国际化：访问文档站首页及 `/docs` 应默认显示英文，切换简体中文后 URL 应带 `/zh-CN` 且首页、顶部导航、侧边栏、正文、搜索框和页面操作文案均显示中文；刷新、站内跳转和再次切回 English 后语言应保持正确，搜索结果与 Markdown/LLM 文档内容不得混入另一种语言。

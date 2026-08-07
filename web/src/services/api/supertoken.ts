@@ -240,9 +240,9 @@ export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, t
         const response = await queryTask<{ videos: TaskResultVideo[] }>(task, config.resourceApiKey, options.signal);
         const state = response.data;
         await updateStoredTaskFromRemote(task, state, response.headers["retry-after"]);
-        options.onProgress?.(toStoredTask(task, state, response.headers["retry-after"]));
+        options.onProgress?.({ ...task });
         if (state.status === "failed") return { status: "failed" as const, error: state.error?.message || "视频生成失败" };
-        if (state.status !== "succeeded") return { status: "pending" as const, progress: state.progress || 0, progressKnown: Boolean(state.progress_known), retryAfterMs: task.retryAfterMs };
+        if (state.status !== "succeeded") return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs };
         const video = state.result?.videos?.[0];
         if (!video?.url) {
             await failStoredTask(task, "视频任务成功但没有返回视频");
@@ -282,7 +282,7 @@ async function waitForTask<T>(task: SuperTokenTaskRecord, resourceApiKey: string
             const state = response.data;
             transientErrors = 0;
             await updateStoredTaskFromRemote(task, state, response.headers["retry-after"]);
-            options.onProgress?.(toStoredTask(task, state, response.headers["retry-after"]));
+            options.onProgress?.({ ...task });
             if (state.status === "succeeded") return state;
             if (state.status === "failed") throw new Error(state.error?.message || "任务执行失败");
         } catch (error) {
@@ -327,8 +327,7 @@ async function persistCreatedTask<T>(
         idempotencyKey,
         clientReferenceId,
         status: response.status === "failed" ? "failed" : "pending",
-        progress: response.progress || 0,
-        progressKnown: Boolean(response.progress_known),
+        ...mergeSuperTokenTaskProgress({ progress: 0, progressKnown: false }, response),
         retryAfterMs: parseRetryAfter(retryAfter),
         createdAt: now,
         updatedAt: now,
@@ -351,12 +350,29 @@ function toStoredTask<T>(task: SuperTokenTaskRecord, state: TaskResponse<T>, ret
     return {
         ...task,
         status: state.status === "failed" ? "failed" : task.status === "succeeded" ? "succeeded" : "pending",
-        progress: state.progress || 0,
-        progressKnown: Boolean(state.progress_known),
+        ...mergeSuperTokenTaskProgress(task, state),
         retryAfterMs: retryAfter === undefined ? task.retryAfterMs : parseRetryAfter(retryAfter),
         updatedAt: Date.now(),
         error: state.error?.message,
     };
+}
+
+export function mergeSuperTokenTaskProgress(
+    task: Pick<SuperTokenTaskRecord, "progress" | "progressKnown">,
+    state: Pick<TaskResponse<unknown>, "status" | "progress" | "progress_known">,
+) {
+    if (state.status === "succeeded") return { progress: 100, progressKnown: true };
+    const previous = clampProgress(task.progress);
+    const incoming = clampProgress(state.progress);
+    return {
+        progress: Math.min(99, Math.max(previous, incoming)),
+        progressKnown: task.progressKnown || Boolean(state.progress_known),
+    };
+}
+
+function clampProgress(value: unknown) {
+    const number = typeof value === "number" && Number.isFinite(value) ? value : 0;
+    return Math.min(100, Math.max(0, number));
 }
 
 async function failStoredTask(task: SuperTokenTaskRecord, error: string) {
@@ -391,6 +407,8 @@ async function materializeImageResults(task: SuperTokenTaskRecord, images: TaskR
         const next = {
             ...current,
             status: "succeeded" as const,
+            progress: 100,
+            progressKnown: true,
             resultUrls: images.map((image) => image.url),
             resultStorageKeys: stored.map((image) => image.storageKey),
             updatedAt: Date.now(),
@@ -424,6 +442,8 @@ async function materializeVideoResult(task: SuperTokenTaskRecord, video: TaskRes
         const next = {
             ...current,
             status: "succeeded" as const,
+            progress: 100,
+            progressKnown: true,
             resultUrls: [video.url],
             resultStorageKeys: [stored.storageKey],
             updatedAt: Date.now(),
