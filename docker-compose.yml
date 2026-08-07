@@ -6,7 +6,9 @@ services:
       - "3000:3000"
     restart: unless-stopped
     environment:
-      # SuperToken/new-api 公网地址。修改后只需重建容器，不需要重新构建镜像。
+      # SuperToken 授权/new-api 公网地址。修改后只需重建容器，不需要重新构建镜像。
+      SUPERTOKEN_AUTH_BASE_URL: ${SUPERTOKEN_AUTH_BASE_URL:-https://supertoken.cc}
+      # 可选：强制覆盖大陆加速和国际直连媒体 API 节点。默认留空并使用内置地区地址。
       SUPERTOKEN_BASE_URL: ${SUPERTOKEN_BASE_URL:-}
       # 统计分析（可选，默认关闭）。每家一个独立变量，填了谁就启用谁，可同时启用多家：
       # ANALYTICS_GA4_ID: G-XXXXXXXXXX                    # Google Analytics 4 衡量 ID

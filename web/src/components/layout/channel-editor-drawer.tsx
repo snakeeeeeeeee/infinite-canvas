@@ -123,7 +123,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
         setAuthorizing(true);
         try {
             const settings = draft.supertoken!;
-            const result = await authorizeSuperToken(settings.region);
+            const result = await authorizeSuperToken();
             const next = authorizedSuperTokenChannel(draft, settings.region, result);
             setDraft(next);
             onSave(next, true);

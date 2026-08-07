@@ -29,25 +29,25 @@ http://localhost:3000
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-仓库内的 `docker-compose.local.yml` 默认将 SuperToken/new-api 地址设为 `https://supertoken.cc`。需要连接其他部署时可在启动命令前覆盖：
+仓库内的 `docker-compose.local.yml` 默认将 SuperToken 授权/new-api 主站设为 `https://supertoken.cc`。需要连接其他授权服务时可在启动命令前覆盖：
 
 ```bash
-SUPERTOKEN_BASE_URL=https://api.example.com docker compose -f docker-compose.local.yml up -d --build --force-recreate
+SUPERTOKEN_AUTH_BASE_URL=https://auth.example.com docker compose -f docker-compose.local.yml up -d --build --force-recreate
 ```
 
 ## SuperToken 地址
 
-主应用镜像支持在容器启动时通过 `SUPERTOKEN_BASE_URL` 指定 SuperToken/new-api 公网地址，无需为不同环境重新构建 Vite 静态文件：
+授权主站和媒体 API 节点使用独立变量。`SUPERTOKEN_AUTH_BASE_URL` 只用于授权页面和授权码兑换；媒体请求默认继续根据渠道区域使用大陆加速 `https://hk.supertoken.cc` 或国际直连 `https://api.supertoken.cc`：
 
 ```yaml
 services:
   app:
     image: ghcr.io/basketikun/infinite-canvas:latest
     environment:
-      SUPERTOKEN_BASE_URL: https://supertoken.cc
+      SUPERTOKEN_AUTH_BASE_URL: https://supertoken.cc
 ```
 
-修改后重新创建容器即可生效。未设置时继续根据渠道区域使用内置的大陆加速或国际站点地址。
+只有需要把所有媒体请求统一转发到自建网关时，才额外设置 `SUPERTOKEN_BASE_URL`。修改任一变量后重新创建容器即可生效，无需重新构建 Vite 静态文件。
 
 ## 文档站镜像
 

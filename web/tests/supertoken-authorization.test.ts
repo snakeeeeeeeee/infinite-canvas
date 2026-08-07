@@ -15,6 +15,16 @@ beforeAll(() => {
 });
 
 describe("SuperToken PKCE and callback validation", () => {
+    test("uses the authorization host without replacing regional media API nodes", async () => {
+        const [{ superTokenAuthorizationBaseUrl }, { superTokenBaseUrl }] = await Promise.all([
+            import("@/services/api/supertoken-authorization"),
+            import("@/lib/supertoken-capabilities"),
+        ]);
+        expect(superTokenAuthorizationBaseUrl()).toBe("https://supertoken.cc");
+        expect(superTokenBaseUrl("cn")).toBe("https://hk.supertoken.cc");
+        expect(superTokenBaseUrl("global")).toBe("https://api.supertoken.cc");
+    });
+
     test("matches the RFC 7636 S256 challenge vector", async () => {
         const { superTokenPkceChallenge } = await import("@/services/api/supertoken-authorization");
         expect(await superTokenPkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");

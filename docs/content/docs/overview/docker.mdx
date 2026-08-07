@@ -23,21 +23,21 @@ docker compose -f docker-compose.local.yml up -d --build
 
 The local source build maps host port `10001` by default. Open `http://localhost:10001`; the container still listens on port `3000`.
 
-The checked-in `docker-compose.local.yml` defaults the SuperToken/new-api origin to `https://supertoken.cc`. Override it for another deployment by prefixing the command with `SUPERTOKEN_BASE_URL=https://api.example.com`.
+The checked-in `docker-compose.local.yml` defaults the SuperToken authorization/new-api origin to `https://supertoken.cc`. Override it for another authorization deployment by prefixing the command with `SUPERTOKEN_AUTH_BASE_URL=https://auth.example.com`.
 
 ## SuperToken origin
 
-Set `SUPERTOKEN_BASE_URL` at container startup to point the application at a specific SuperToken/new-api deployment. The same image can be reused without rebuilding the Vite bundle:
+Authorization and media API origins are configured independently. `SUPERTOKEN_AUTH_BASE_URL` is used only for the authorization page and code exchange. Media requests continue to use the built-in mainland accelerator at `https://hk.supertoken.cc` or global direct endpoint at `https://api.supertoken.cc`:
 
 ```yaml
 services:
   app:
     image: ghcr.io/basketikun/infinite-canvas:latest
     environment:
-      SUPERTOKEN_BASE_URL: https://supertoken.cc
+      SUPERTOKEN_AUTH_BASE_URL: https://supertoken.cc
 ```
 
-Recreate the container after changing the value. When it is unset, the selected provider region continues to use the built-in mainland or global origin.
+Set `SUPERTOKEN_BASE_URL` only when every media request must use one custom gateway. Recreate the container after changing either value; the Vite bundle does not need to be rebuilt.
 
 ## Documentation image
 

@@ -5,7 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      SUPERTOKEN_BASE_URL: ${SUPERTOKEN_BASE_URL:-https://supertoken.cc}
+      SUPERTOKEN_AUTH_BASE_URL: ${SUPERTOKEN_AUTH_BASE_URL:-https://supertoken.cc}
+      SUPERTOKEN_BASE_URL: ${SUPERTOKEN_BASE_URL:-}
     ports:
       - "10001:3000"
     restart: unless-stopped

@@ -81,7 +81,7 @@ docker compose up -d
 
 运行后默认端口3000，可访问 `http://localhost:3000`。
 
-Docker 部署可通过 `SUPERTOKEN_BASE_URL` 指定 SuperToken/new-api 公网地址；该变量在容器启动时生效，无需重新构建前端静态文件。
+Docker 部署可通过 `SUPERTOKEN_AUTH_BASE_URL` 指定 SuperToken 授权/new-api 公网地址；大陆加速与国际直连媒体 API 节点默认保持独立，也可通过 `SUPERTOKEN_BASE_URL` 显式统一覆盖。变量在容器启动时生效，无需重新构建前端静态文件。
 
 首次打开后进入右上角配置，填入自己的 OpenAI 兼容 `Base URL` 和 `API Key`。
 

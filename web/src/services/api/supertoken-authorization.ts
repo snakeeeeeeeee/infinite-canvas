@@ -1,4 +1,5 @@
-import { superTokenBaseUrl, type SuperTokenRegion } from "@/lib/supertoken-capabilities";
+import { SUPERTOKEN_AUTH_BASE_URL } from "@/constant/runtime-config";
+import type { SuperTokenRegion } from "@/lib/supertoken-capabilities";
 import { createSuperTokenChannel, type ModelChannel } from "@/stores/use-config-store";
 
 export const SUPERTOKEN_AUTHORIZATION_MESSAGE = "infinite-canvas:supertoken-authorization";
@@ -33,7 +34,7 @@ export class SuperTokenAuthorizationError extends Error {
     }
 }
 
-export async function authorizeSuperToken(region: SuperTokenRegion): Promise<SuperTokenAuthorizationResult> {
+export async function authorizeSuperToken(): Promise<SuperTokenAuthorizationResult> {
     const state = randomBase64Url(32);
     const codeVerifier = randomBase64Url(64);
     const popup = openAuthorizationPopup();
@@ -45,7 +46,7 @@ export async function authorizeSuperToken(region: SuperTokenRegion): Promise<Sup
         throw error;
     }
     const redirectUri = `${window.location.origin}${CALLBACK_PATH}`;
-    const baseUrl = superTokenBaseUrl(region).replace(/\/+$/, "");
+    const baseUrl = superTokenAuthorizationBaseUrl();
     const authorizeUrl = new URL("/canvas/authorize", `${baseUrl}/`);
     authorizeUrl.search = new URLSearchParams({
         client_id: SUPERTOKEN_CLIENT_ID,
@@ -69,6 +70,10 @@ export async function authorizeSuperToken(region: SuperTokenRegion): Promise<Sup
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
     });
+}
+
+export function superTokenAuthorizationBaseUrl() {
+    return SUPERTOKEN_AUTH_BASE_URL.trim().replace(/\/+$/, "");
 }
 
 export function authorizedSuperTokenChannel(
