@@ -27,6 +27,7 @@ export type SuperTokenVideoCapability = {
     defaultReferenceMode: SuperTokenReferenceMode;
     audioPolicy: SuperTokenAudioPolicy;
     fixedResolution?: string;
+    allowedResolutions?: string[];
 };
 
 export type SuperTokenVideoSettings = {
@@ -106,6 +107,20 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         audioPolicy: "optional",
     },
     {
+        family: "leonardo-seedance-2.5",
+        label: "Seedance 2.5",
+        provider: "Leonardo",
+        duration: { min: 4, max: 30 },
+        aspectRatios: SIX_VIDEO_RATIOS,
+        referenceModes: {
+            frame: { images: 2, videos: 0, audios: 0, total: 2, minImages: 1 },
+            media: { images: 4, videos: 3, audios: 1, visualTotal: 7, audioRequiresVisual: true },
+        },
+        defaultReferenceMode: "media",
+        audioPolicy: "optional",
+        allowedResolutions: ["480p", "720p"],
+    },
+    {
         family: "adobe-kling-3.0",
         label: "Kling 3.0",
         provider: "Adobe",
@@ -181,8 +196,8 @@ export function superTokenBaseUrl(region: SuperTokenRegion | undefined) {
     return SUPERTOKEN_BASE_URLS[region || "cn"];
 }
 
-export function superTokenVideoCapability(family: string) {
-    return SUPERTOKEN_VIDEO_CAPABILITIES.find((item) => item.family === family);
+export function superTokenVideoCapability(family: string): SuperTokenVideoCapability | undefined {
+    return SUPERTOKEN_VIDEO_CAPABILITIES.find((item) => item.family === family) || dynamicSeedanceCapability(family);
 }
 
 export function superTokenImageCapability(model: string) {
@@ -219,10 +234,8 @@ export function superTokenModelLabel(model: string) {
 
 export function classifySuperTokenVideoModel(modelId: string) {
     const value = modelId.toLowerCase();
-    if (/^adobe-seedance-2\.0-fast-\d+p$/.test(value)) return "adobe-seedance-2.0-fast";
-    if (/^adobe-seedance-2\.0-\d+p$/.test(value)) return "adobe-seedance-2.0";
-    if (/^leonardo-seedance-2\.0-fast-\d+p$/.test(value)) return "leonardo-seedance-2.0-fast";
-    if (/^leonardo-seedance-2\.0-\d+p$/.test(value)) return "leonardo-seedance-2.0";
+    const seedance = value.match(/^((?:adobe|leonardo)-seedance-[a-z0-9]+(?:[.-][a-z0-9]+)*)-[1-9]\d*p$/);
+    if (seedance) return seedance[1];
     if (/^adobe-kling-3\.0-omni-\d+p$/.test(value)) return "adobe-kling-3.0-omni";
     if (/^adobe-kling-3\.0-\d+p$/.test(value)) return "adobe-kling-3.0";
     if (/^(?:leonardo-)?minimax-h3-1440p$/.test(value)) return "leonardo-minimax-h3";
@@ -236,24 +249,61 @@ function isExcludedSuperTokenVideoModel(modelId: string) {
 
 export function superTokenVideoFamilies(modelIds: string[]) {
     const available = new Set<string>(modelIds.map(classifySuperTokenVideoModel).filter(Boolean));
-    return SUPERTOKEN_VIDEO_CAPABILITIES.filter((item) => available.has(item.family)).map((item) => item.family);
+    const known = SUPERTOKEN_VIDEO_CAPABILITIES.filter((item) => available.has(item.family)).map((item) => item.family);
+    const knownSet = new Set(known);
+    return [...known, ...Array.from(available).filter((family) => !knownSet.has(family) && Boolean(superTokenVideoCapability(family)))];
 }
 
 export function superTokenVideoResolutions(family: string, modelIds: string[]) {
     const capability = superTokenVideoCapability(family);
     if (capability?.fixedResolution) return [capability.fixedResolution];
+    const allowed = capability?.allowedResolutions;
     return modelIds
         .filter((modelId) => classifySuperTokenVideoModel(modelId) === family)
         .map((modelId) => modelId.match(/-(\d+p)$/i)?.[1]?.toLowerCase() || "")
         .filter(Boolean)
+        .filter((value) => !allowed || allowed.includes(value))
         .filter((value, index, values) => values.indexOf(value) === index)
         .sort((a, b) => Number(a.replace("p", "")) - Number(b.replace("p", "")));
 }
 
 export function resolveSuperTokenVideoModel(family: string, resolution: string, modelIds: string[]) {
     const normalized = `${resolution.replace(/p$/i, "")}p`.toLowerCase();
+    const allowed = superTokenVideoCapability(family)?.allowedResolutions;
+    if (allowed && !allowed.includes(normalized)) return "";
     const models = modelIds.filter((modelId) => classifySuperTokenVideoModel(modelId) === family);
     return models.find((modelId) => modelId.toLowerCase().endsWith(`-${normalized}`)) || "";
+}
+
+function dynamicSeedanceCapability(family: string): SuperTokenVideoCapability | undefined {
+    const match = family.match(/^(adobe|leonardo)-seedance-([a-z0-9]+(?:[.-][a-z0-9]+)*)$/i);
+    if (!match) return undefined;
+    const provider = match[1].toLowerCase() === "adobe" ? "Adobe" : "Leonardo";
+    const label = `Seedance ${match[2].split("-").map((part) => part === "fast" ? "Fast" : part).join(" ")}`;
+    return provider === "Adobe"
+        ? {
+              family,
+              label,
+              provider,
+              duration: { min: 4, max: 15 },
+              aspectRatios: SIX_VIDEO_RATIOS,
+              referenceModes: {
+                  frame: { images: 2, videos: 0, audios: 0, total: 2 },
+                  media: { images: 9, videos: 3, audios: 3, total: 12 },
+              },
+              defaultReferenceMode: "media",
+              audioPolicy: "optional",
+          }
+        : {
+              family,
+              label,
+              provider,
+              duration: { min: 4, max: 15 },
+              aspectRatios: SIX_VIDEO_RATIOS,
+              referenceModes: { media: { images: 4, videos: 3, audios: 1, visualTotal: 7, audioRequiresVisual: true } },
+              defaultReferenceMode: "media",
+              audioPolicy: "optional",
+          };
 }
 
 export function superTokenSelectableModels(imageModelIds: string[], videoModelIds: string[]) {
@@ -340,8 +390,7 @@ export function validateSuperTokenVideoSelection(params: { capability: SuperToke
     const limits = capability.referenceModes[referenceMode];
     if (!limits) return "当前模型不支持所选参考模式";
     if (images > limits.images || videos > limits.videos || audios > limits.audios || (limits.total && images + videos + audios > limits.total) || (limits.visualTotal && images + videos > limits.visualTotal)) return "参考素材数量超过当前模型限制";
-    const hasReferences = images + videos + audios > 0;
-    if (hasReferences && (images < (limits.minImages || 0) || videos < (limits.minVideos || 0) || audios < (limits.minAudios || 0))) return "当前参考模式缺少必需素材";
+    if (images < (limits.minImages || 0) || videos < (limits.minVideos || 0) || audios < (limits.minAudios || 0)) return "当前参考模式缺少必需素材";
     if (limits.audioRequiresVisual && audios && !images && !videos) return "参考音频必须搭配图片或视频";
     if (capability.audioPolicy === "required" && !generateAudio) return "当前模型的成片音轨固定开启";
     if (capability.audioPolicy === "unsupported" && generateAudio) return "当前模型不支持生成音轨";

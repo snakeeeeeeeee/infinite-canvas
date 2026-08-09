@@ -21,11 +21,22 @@ describe("SuperToken video model catalog", () => {
     test("classifies the supported provider and variant SKUs", () => {
         expect(classifySuperTokenVideoModel("adobe-seedance-2.0-fast-720p")).toBe("adobe-seedance-2.0-fast");
         expect(classifySuperTokenVideoModel("leonardo-seedance-2.0-1080p")).toBe("leonardo-seedance-2.0");
+        expect(classifySuperTokenVideoModel("leonardo-seedance-2.5-720p")).toBe("leonardo-seedance-2.5");
+        expect(classifySuperTokenVideoModel("adobe-seedance-3.0-ultra-1440p")).toBe("adobe-seedance-3.0-ultra");
         expect(classifySuperTokenVideoModel("adobe-kling-3.0-omni-1080p")).toBe("adobe-kling-3.0-omni");
         expect(classifySuperTokenVideoModel("leonardo-minimax-h3-1440p")).toBe("leonardo-minimax-h3");
         expect(classifySuperTokenVideoModel("adobe-veo-3.1-1080p")).toBe("");
         expect(classifySuperTokenVideoModel("grok-imagine-video-15s-720p")).toBe("");
         expect(classifySuperTokenVideoModel("grok-imagine-video-1.5-preview-15s-720p")).toBe("");
+    });
+
+    test("discovers returned Seedance families without synthesizing unavailable resolutions", () => {
+        const models = ["leonardo-seedance-2.5-480p", "leonardo-seedance-2.5-720p", "leonardo-seedance-2.5-1080p", "adobe-seedance-3.0-ultra-720p", "leonardo-seedance-3.1-pro-2160p"];
+        expect(superTokenVideoFamilies(models)).toEqual(["leonardo-seedance-2.5", "adobe-seedance-3.0-ultra", "leonardo-seedance-3.1-pro"]);
+        expect(superTokenVideoResolutions("leonardo-seedance-2.5", models)).toEqual(["480p", "720p"]);
+        expect(resolveSuperTokenVideoModel("leonardo-seedance-2.5", "720p", models)).toBe("leonardo-seedance-2.5-720p");
+        expect(resolveSuperTokenVideoModel("leonardo-seedance-2.5", "1080p", models)).toBe("");
+        expect(superTokenUnsupportedModels([], models)).toEqual([]);
     });
 
     test("intersects families and resolutions with the account model list", () => {
@@ -46,6 +57,7 @@ describe("SuperToken video request capabilities", () => {
     test("encodes Seedance media images as reference_images only", () => {
         const capability = superTokenVideoCapability("adobe-seedance-2.0")!;
         expect(superTokenReferenceImageFields(capability, "media", ["one", "two"])).toEqual({ image: undefined, referenceImages: ["one", "two"] });
+        expect(superTokenReferenceImageFields(superTokenVideoCapability("leonardo-seedance-2.5")!, "frame", ["start", "end"])).toEqual({ image: "start", referenceImages: ["end"] });
     });
 
     test("encodes MiniMax H3 ordinary images with the first item in input.image", () => {
@@ -56,6 +68,7 @@ describe("SuperToken video request capabilities", () => {
 
     test("enforces H3 media material and audio policy", () => {
         const capability = superTokenVideoCapability("leonardo-minimax-h3")!;
+        expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "images", images: 0, videos: 0, audios: 0, generateAudio: true })).toBe("当前参考模式缺少必需素材");
         expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 0, generateAudio: true })).toBe("当前参考模式缺少必需素材");
         expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 1, generateAudio: false })).toBe("当前模型的成片音轨固定开启");
         expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 1, generateAudio: true })).toBe("");
@@ -69,6 +82,13 @@ describe("SuperToken video request capabilities", () => {
         const leonardo = superTokenVideoCapability("leonardo-seedance-2.0")!;
         expect(validateSuperTokenVideoSelection({ capability: leonardo, duration: 6, aspectRatio: "16:9", referenceMode: "media", images: 4, videos: 3, audios: 1, generateAudio: true })).toBe("");
         expect(validateSuperTokenVideoSelection({ capability: leonardo, duration: 6, aspectRatio: "16:9", referenceMode: "media", images: 5, videos: 3, audios: 0, generateAudio: true })).toBe("参考素材数量超过当前模型限制");
+
+        const seedance25 = superTokenVideoCapability("leonardo-seedance-2.5")!;
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "media", images: 4, videos: 3, audios: 1, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "frame", images: 2, videos: 0, audios: 0, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "frame", images: 0, videos: 0, audios: 0, generateAudio: true })).toBe("当前参考模式缺少必需素材");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 31, aspectRatio: "16:9", referenceMode: "media", images: 0, videos: 0, audios: 0, generateAudio: true })).toBe("当前模型不支持所选时长");
+        expect(superTokenVideoCapability("leonardo-seedance-3.0")?.duration.max).toBe(15);
     });
 
     test("calculates remaining capacity from per-type and combined limits", () => {
@@ -94,7 +114,7 @@ describe("SuperToken video request capabilities", () => {
         expect(normalizeSuperTokenReferenceMode(klingOmni, "media")).toBe("images");
         expect(normalizeSuperTokenReferenceMode(minimax, undefined)).toBe("images");
 
-        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
+        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
             const capability = superTokenVideoCapability(family)!;
             for (const mode of ["frame", "images", "media"] as const) {
                 expect(capability.referenceModes[normalizeSuperTokenReferenceMode(capability, mode)]).toBeDefined();
@@ -103,7 +123,7 @@ describe("SuperToken video request capabilities", () => {
     });
 
     test("resets every supported model family to valid defaults", () => {
-        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
+        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
             const capability = superTokenVideoCapability(family)!;
             const resolutions = capability.fixedResolution ? [capability.fixedResolution] : ["480p", "720p", "1080p"];
             const settings = normalizeSuperTokenVideoSettings(capability, resolutions, { resolution: "1080p", aspectRatio: "1:1", duration: 12, referenceMode: "media", generateAudio: false }, true);

@@ -156,8 +156,8 @@ export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {
 }
 
 export function superTokenReferenceDurationPolicy(model: string, kind: "video" | "audio"): SuperTokenReferenceDurationPolicy | undefined {
-    if (model.startsWith("adobe-seedance-2.0")) return { minMs: 2000, maxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS + SEEDANCE_REFERENCE_DURATION_TOLERANCE_MS, normalizeAfterMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, normalizedTotalDurationMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, ...(kind === "audio" ? { totalMaxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS } : {}) };
-    if (model.startsWith("leonardo-seedance-2.0")) {
+    if (model.startsWith("adobe-seedance-")) return { minMs: 2000, maxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS + SEEDANCE_REFERENCE_DURATION_TOLERANCE_MS, normalizeAfterMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, normalizedTotalDurationMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, ...(kind === "audio" ? { totalMaxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS } : {}) };
+    if (model.startsWith("leonardo-seedance-")) {
         return kind === "video" ? { minMs: 3000, maxMs: 10300, normalizeAfterMs: 10000, normalizedTotalDurationMs: 10000, totalMaxMs: 15000 } : { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs: 15000 };
     }
     if (kind === "audio" && model.startsWith("leonardo-minimax-h3")) return { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs: 15000 };
