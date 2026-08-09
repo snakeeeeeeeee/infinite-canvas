@@ -114,7 +114,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         aspectRatios: SIX_VIDEO_RATIOS,
         referenceModes: {
             frame: { images: 2, videos: 0, audios: 0, total: 2, minImages: 1 },
-            media: { images: 4, videos: 3, audios: 1, visualTotal: 7, audioRequiresVisual: true },
+            media: { images: 30, videos: 10, audios: 10, total: 50, audioRequiresVisual: true },
         },
         defaultReferenceMode: "media",
         audioPolicy: "optional",

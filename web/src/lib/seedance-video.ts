@@ -151,14 +151,15 @@ export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {
             if (pixels < 640 * 640 || pixels > 3326 * 2494) return i18n.t("seedance.errors.pixels", { label });
         }
     }
-    if (totalDurationMs > 15000) return i18n.t("seedance.errors.totalDuration");
+    if (totalDurationMs > 15000) return i18n.t("seedance.errors.totalDuration", { max: 15 });
     return "";
 }
 
 export function superTokenReferenceDurationPolicy(model: string, kind: "video" | "audio"): SuperTokenReferenceDurationPolicy | undefined {
     if (model.startsWith("adobe-seedance-")) return { minMs: 2000, maxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS + SEEDANCE_REFERENCE_DURATION_TOLERANCE_MS, normalizeAfterMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, normalizedTotalDurationMs: SEEDANCE_REFERENCE_MAX_DURATION_MS, ...(kind === "audio" ? { totalMaxMs: SEEDANCE_REFERENCE_MAX_DURATION_MS } : {}) };
     if (model.startsWith("leonardo-seedance-")) {
-        return kind === "video" ? { minMs: 3000, maxMs: 10300, normalizeAfterMs: 10000, normalizedTotalDurationMs: 10000, totalMaxMs: 15000 } : { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs: 15000 };
+        const totalMaxMs = /^leonardo-seedance-2\.5(?:-\d+p)?$/i.test(model) ? 30_200 : 15_000;
+        return kind === "video" ? { minMs: 3000, maxMs: 10300, normalizeAfterMs: 10000, normalizedTotalDurationMs: 10000, totalMaxMs } : { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs };
     }
     if (kind === "audio" && model.startsWith("leonardo-minimax-h3")) return { minMs: 2000, maxMs: 15300, normalizeAfterMs: 15000, normalizedTotalDurationMs: 15000, totalMaxMs: 15000 };
     return undefined;
@@ -179,8 +180,8 @@ export function superTokenReferenceDurationError(model: string, videos: Referenc
         const durationMs = audios[index].durationMs;
         if (durationMs && audioPolicy && (durationMs < audioPolicy.minMs || durationMs > audioPolicy.maxMs)) return i18n.t("seedance.errors.referenceDuration", { label: seedanceReferenceLabel("audio", index), min: audioPolicy.minMs / 1000, max: audioPolicy.maxMs / 1000 });
     }
-    if (videoPolicy?.totalMaxMs && videos.reduce((total, item) => total + effectiveReferenceDurationMs(item.durationMs || 0, videoPolicy), 0) > videoPolicy.totalMaxMs) return i18n.t("seedance.errors.totalDuration");
-    if (audioPolicy?.totalMaxMs && audios.reduce((total, item) => total + effectiveReferenceDurationMs(item.durationMs || 0, audioPolicy), 0) > audioPolicy.totalMaxMs) return i18n.t("seedance.errors.totalAudioDuration");
+    if (videoPolicy?.totalMaxMs && videos.reduce((total, item) => total + effectiveReferenceDurationMs(item.durationMs || 0, videoPolicy), 0) > videoPolicy.totalMaxMs) return i18n.t("seedance.errors.totalDuration", { max: videoPolicy.totalMaxMs / 1000 });
+    if (audioPolicy?.totalMaxMs && audios.reduce((total, item) => total + effectiveReferenceDurationMs(item.durationMs || 0, audioPolicy), 0) > audioPolicy.totalMaxMs) return i18n.t("seedance.errors.totalAudioDuration", { max: audioPolicy.totalMaxMs / 1000 });
     return "";
 }
 

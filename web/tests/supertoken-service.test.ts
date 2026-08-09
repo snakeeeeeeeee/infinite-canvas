@@ -47,7 +47,9 @@ describe("SuperToken request mapping", () => {
         expect(superTokenReferenceDurationError(model, [video(10093)], [audio(15093)])).toBe("");
         expect(superTokenReferenceDurationError(model, [video(10301)], [])).toContain("10.3");
         expect(superTokenReferenceDurationError(model, [], [audio(15301)])).toContain("15.3");
-        expect(superTokenReferenceDurationError("leonardo-seedance-2.5-720p", [video(10093)], [audio(15093)])).toBe("");
+        expect(superTokenReferenceDurationError("leonardo-seedance-2.5-720p", [video(10000), video(10000, "video-2"), video(10093, "video-3")], [audio(15000), audio(15093, "audio-2")])).toBe("");
+        expect(superTokenReferenceDurationError("leonardo-seedance-2.5-720p", [video(10000), video(10000, "video-2"), video(10000, "video-3"), video(3000, "video-4")], [])).toContain("30.2");
+        expect(superTokenReferenceDurationError("leonardo-seedance-2.5-720p", [], [audio(10100), audio(10100, "audio-2"), audio(10100, "audio-3")])).toContain("30.2");
         expect(superTokenReferenceDurationError(model, [video(5000), video(10093, "video-2")], [])).toBe("");
         expect(superTokenReferenceDurationError(model, [video(5100), video(10093, "video-2")], [])).toContain("15");
         expect(superTokenReferenceDurationError("leonardo-minimax-h3-1440p", [], [audio(15093)])).toBe("");

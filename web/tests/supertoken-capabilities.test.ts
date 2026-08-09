@@ -84,7 +84,10 @@ describe("SuperToken video request capabilities", () => {
         expect(validateSuperTokenVideoSelection({ capability: leonardo, duration: 6, aspectRatio: "16:9", referenceMode: "media", images: 5, videos: 3, audios: 0, generateAudio: true })).toBe("参考素材数量超过当前模型限制");
 
         const seedance25 = superTokenVideoCapability("leonardo-seedance-2.5")!;
-        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "media", images: 4, videos: 3, audios: 1, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "media", images: 30, videos: 10, audios: 10, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "media", images: 31, videos: 0, audios: 0, generateAudio: true })).toBe("参考素材数量超过当前模型限制");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "media", images: 0, videos: 10, audios: 1, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "media", images: 0, videos: 0, audios: 1, generateAudio: true })).toBe("参考音频必须搭配图片或视频");
         expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "frame", images: 2, videos: 0, audios: 0, generateAudio: true })).toBe("");
         expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 30, aspectRatio: "16:9", referenceMode: "frame", images: 0, videos: 0, audios: 0, generateAudio: true })).toBe("当前参考模式缺少必需素材");
         expect(validateSuperTokenVideoSelection({ capability: seedance25, duration: 31, aspectRatio: "16:9", referenceMode: "media", images: 0, videos: 0, audios: 0, generateAudio: true })).toBe("当前模型不支持所选时长");
@@ -100,6 +103,11 @@ describe("SuperToken video request capabilities", () => {
         expect(remainingSuperTokenReferenceCapacity("video", { images: 4, videos: 2, audios: 0 }, leonardo)).toBe(1);
         expect(remainingSuperTokenReferenceCapacity("image", { images: 3, videos: 3, audios: 0 }, leonardo)).toBe(1);
         expect(remainingSuperTokenReferenceCapacity("audio", { images: 4, videos: 3, audios: 0 }, leonardo)).toBe(1);
+
+        const seedance25 = superTokenVideoCapability("leonardo-seedance-2.5")!.referenceModes.media!;
+        expect(remainingSuperTokenReferenceCapacity("image", { images: 29, videos: 10, audios: 10 }, seedance25)).toBe(1);
+        expect(remainingSuperTokenReferenceCapacity("video", { images: 30, videos: 9, audios: 10 }, seedance25)).toBe(1);
+        expect(remainingSuperTokenReferenceCapacity("audio", { images: 30, videos: 10, audios: 9 }, seedance25)).toBe(1);
     });
 
     test("falls back to each model's default mode without changing supported modes", () => {
