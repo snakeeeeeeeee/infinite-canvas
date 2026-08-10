@@ -44,10 +44,11 @@ export default {
             maxOutputs: "Up to {{count}} per request",
             singleOutput: "1 per request",
             generateAndEdit: "Generate and edit",
+            recommended: "Recommended",
             families: { "gpt-image": "GPT Image", gemini: "Gemini", other: "Other" },
             providers: { azure: "Azure official", adobe: "Adobe", "third-party": "Third-party", google: "Google" },
             aliases: { "small-banana": "Small Banana", "big-banana": "Big Banana" },
-            positioning: { fast: "Fast generation", quality: "Quality first" },
+            positioning: { balanced: "Fast, high-quality output", fast: "Fast generation", quality: "Quality first" },
         },
         videoModelPicker: {
             title: "Select video model",

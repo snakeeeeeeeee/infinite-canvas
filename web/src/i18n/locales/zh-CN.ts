@@ -44,10 +44,11 @@ export default {
             maxOutputs: "单次最多 {{count}} 张",
             singleOutput: "每次 1 张",
             generateAndEdit: "生成与编辑",
+            recommended: "推荐",
             families: { "gpt-image": "GPT Image", gemini: "Gemini", other: "其他" },
             providers: { azure: "Azure 官方", adobe: "Adobe", "third-party": "第三方渠道", google: "Google" },
             aliases: { "small-banana": "小香蕉", "big-banana": "大香蕉" },
-            positioning: { fast: "快速生成", quality: "质量优先" },
+            positioning: { balanced: "速度与质量兼顾", fast: "快速生成", quality: "质量优先" },
         },
         videoModelPicker: {
             title: "选择视频模型",

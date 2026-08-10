@@ -17,6 +17,7 @@ Object.defineProperty(globalThis, "localStorage", {
 const {
     createModelChannel,
     createSuperTokenChannel,
+    configWithChannels,
     defaultConfig,
     encodeChannelModel,
     resolveModelRequestConfig,
@@ -53,6 +54,21 @@ describe("SuperToken channel configuration", () => {
 
         const missingResource = createSuperTokenChannel({ ...imageOnly, supertoken: { ...imageOnly.supertoken!, resourceApiKey: "" } });
         expect(selectableModelsByCapability({ ...defaultConfig, channels: [missingResource] })).toEqual([]);
+    });
+
+    test("prefers Adobe for a new image setup and Flash within a Gemini-only setup", () => {
+        const mixed = createSuperTokenChannel({
+            supertoken: { region: "cn", imageApiKey: "image-key", videoApiKey: "", resourceApiKey: "resource-key", imageModels: ["gpt-image-2", "gemini-3.1-flash-image", "adobe-gpt-image-2-count"], videoModels: [] },
+        });
+        const mixedConfig = configWithChannels(defaultConfig, [mixed], mixed.id);
+        expect(mixedConfig.imageModel).toBe(encodeChannelModel(mixed.id, "adobe-gpt-image-2-count"));
+
+        const gemini = createSuperTokenChannel({
+            supertoken: { region: "cn", imageApiKey: "image-key", videoApiKey: "", resourceApiKey: "resource-key", imageModels: ["gemini-3-pro-image-count", "gemini-3.1-flash-image"], videoModels: [] },
+        });
+        expect(configWithChannels(defaultConfig, [gemini], gemini.id).imageModel).toBe(encodeChannelModel(gemini.id, "gemini-3.1-flash-image"));
+
+        expect(configWithChannels({ ...mixedConfig, imageModel: encodeChannelModel(mixed.id, "gpt-image-2") }, [mixed], mixed.id).imageModel).toBe(encodeChannelModel(mixed.id, "gpt-image-2"));
     });
 
     test("only exposes models from configured custom channels", () => {

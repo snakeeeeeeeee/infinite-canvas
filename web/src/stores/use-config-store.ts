@@ -392,8 +392,16 @@ function pickChannelModel(config: AiConfig, capability: ModelCapability, current
     const options = selectableModelsByCapability(config, capability);
     const normalized = normalizeModelOptionValue(current, config.channels);
     if (options.includes(normalized)) return normalized;
-    const preferred = preferredChannelId ? options.find((option) => decodeChannelModel(option)?.channelId === preferredChannelId) : undefined;
-    return preferred || options[0] || "";
+    const preferred = preferredChannelId ? options.filter((option) => decodeChannelModel(option)?.channelId === preferredChannelId) : [];
+    if (capability === "image" && preferred.length) return recommendedImageModel(preferred);
+    return preferred[0] || options[0] || "";
+}
+
+function recommendedImageModel(options: string[]) {
+    return options.find((option) => modelOptionName(option) === "adobe-gpt-image-2-count")
+        || options.find((option) => modelOptionName(option) === "gemini-3.1-flash-image")
+        || options[0]
+        || "";
 }
 
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {

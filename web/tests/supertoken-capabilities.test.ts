@@ -158,7 +158,7 @@ describe("SuperToken image catalog", () => {
 
     test("uses explicit per-request output limits instead of model-name suffixes", () => {
         expect(superTokenImageCapability("gpt-image-2")).toMatchObject({ family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
-        expect(superTokenImageCapability("adobe-gpt-image-2-count")).toMatchObject({ family: "gpt-image", provider: "adobe", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
+        expect(superTokenImageCapability("adobe-gpt-image-2-count")).toMatchObject({ family: "gpt-image", provider: "adobe", positioning: "balanced", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
         expect(superTokenImageCapability("gpt-image-2-count")).toMatchObject({ family: "gpt-image", provider: "third-party", displayResolution: { max: "1.5K" }, maxOutputsPerRequest: 1 });
         expect(superTokenImageCapability("gemini-3.1-flash-image")?.maxOutputsPerRequest).toBe(1);
         expect(superTokenImageCapability("gemini-3.1-flash-image")).toMatchObject({ family: "gemini", alias: "small-banana", positioning: "fast", operations: ["generation", "edit"] });
