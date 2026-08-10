@@ -10,12 +10,22 @@ export type SuperTokenRouteHealth = {
     credentialTag: string;
 };
 
+type SuperTokenRouteHealthMonitor = {
+    resourceApiKey: string;
+    subscribers: number;
+    active: boolean;
+    runId: number;
+    timer?: number;
+};
+
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const SLOW_RESPONSE_MS = 2000;
 const REQUEST_TIMEOUT_MS = 5000;
+const ROUTES: SuperTokenRegion[] = ["cn", "global"];
 const healthByRegion = new Map<SuperTokenRegion, SuperTokenRouteHealth>();
 const inFlight = new Map<string, Promise<SuperTokenRouteHealth>>();
 const listeners = new Set<() => void>();
+const monitors = new Map<string, SuperTokenRouteHealthMonitor>();
 
 export function subscribeSuperTokenRouteHealth(listener: () => void) {
     listeners.add(listener);
@@ -41,6 +51,30 @@ export function checkSuperTokenRouteHealth(region: SuperTokenRegion, resourceApi
     const request = probeRoute(region, baseUrl, resourceApiKey, tag).finally(() => inFlight.delete(requestKey));
     inFlight.set(requestKey, request);
     return request;
+}
+
+export function checkSuperTokenRoutesHealth(resourceApiKey: string, force = false) {
+    return Promise.all(ROUTES.map((region) => checkSuperTokenRouteHealth(region, resourceApiKey, force)));
+}
+
+export function monitorSuperTokenRouteHealth(resourceApiKey: string) {
+    const key = resourceApiKey.trim();
+    const existing = monitors.get(key);
+    if (existing) existing.subscribers += 1;
+    else {
+        const monitor: SuperTokenRouteHealthMonitor = { resourceApiKey: key, subscribers: 1, active: true, runId: 0 };
+        monitors.set(key, monitor);
+        if (monitors.size === 1) document.addEventListener("visibilitychange", refreshVisibleMonitors);
+        void refreshMonitor(monitor);
+    }
+    return () => {
+        const monitor = monitors.get(key);
+        if (!monitor || --monitor.subscribers > 0) return;
+        monitor.active = false;
+        if (monitor.timer) window.clearTimeout(monitor.timer);
+        monitors.delete(key);
+        if (!monitors.size) document.removeEventListener("visibilitychange", refreshVisibleMonitors);
+    };
 }
 
 export function markSuperTokenRouteUnavailable(baseUrl: string, resourceApiKey = "") {
@@ -90,6 +124,28 @@ function setHealth(health: SuperTokenRouteHealth) {
     healthByRegion.set(health.region, health);
     emitChange();
     return health;
+}
+
+async function refreshMonitor(monitor: SuperTokenRouteHealthMonitor) {
+    const runId = ++monitor.runId;
+    if (monitor.timer) window.clearTimeout(monitor.timer);
+    monitor.timer = undefined;
+    if (document.visibilityState !== "visible") return;
+    await checkSuperTokenRoutesHealth(monitor.resourceApiKey);
+    if (monitor.active && monitor.runId === runId) scheduleMonitor(monitor);
+}
+
+function scheduleMonitor(monitor: SuperTokenRouteHealthMonitor) {
+    if (document.visibilityState !== "visible") return;
+    const tag = credentialTag(monitor.resourceApiKey);
+    const checkedAt = ROUTES.map((region) => healthByRegion.get(region)).filter((health) => health?.credentialTag === tag && health.checkedAt).map((health) => health!.checkedAt!);
+    const delay = checkedAt.length === ROUTES.length ? Math.max(1000, CACHE_TTL_MS - (Date.now() - Math.max(...checkedAt)) + 50) : CACHE_TTL_MS;
+    monitor.timer = window.setTimeout(() => void refreshMonitor(monitor), delay);
+}
+
+function refreshVisibleMonitors() {
+    if (document.visibilityState !== "visible") return;
+    monitors.forEach((monitor) => void refreshMonitor(monitor));
 }
 
 function emitChange() {

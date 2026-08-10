@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { TFunction } from "i18next";
 import { Check, ChevronDown, Globe2, LoaderCircle, RefreshCw, Zap } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
@@ -7,8 +7,9 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { superTokenBaseUrl, type SuperTokenRegion } from "@/lib/supertoken-capabilities";
 import {
-    checkSuperTokenRouteHealth,
+    checkSuperTokenRoutesHealth,
     getSuperTokenRouteHealth,
+    monitorSuperTokenRouteHealth,
     subscribeSuperTokenRouteHealth,
     type SuperTokenRouteHealth,
 } from "@/services/api/supertoken-route-health";
@@ -43,11 +44,17 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
     const healthByRegion = { cn: cnHealth, global: globalHealth };
     const activeHealth = healthByRegion[activeRegion];
     const routesAreDistinct = superTokenBaseUrl("cn") !== superTokenBaseUrl("global");
+    const routeAvailable = canSelectSuperTokenRoute(config) && Boolean(settings) && routesAreDistinct;
 
-    if (!canSelectSuperTokenRoute(config) || !settings || !routesAreDistinct) return null;
+    useEffect(() => {
+        if (!routeAvailable) return;
+        return monitorSuperTokenRouteHealth(resourceApiKey);
+    }, [resourceApiKey, routeAvailable]);
+
+    if (!routeAvailable) return null;
 
     const loadHealth = (force: boolean) => {
-        void Promise.all(ROUTES.map((region) => checkSuperTokenRouteHealth(region, resourceApiKey, force)));
+        void checkSuperTokenRoutesHealth(resourceApiKey, force);
     };
     const changeOpen = (nextOpen: boolean) => {
         setOpen(nextOpen);
@@ -121,7 +128,7 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
                         })}
                     </div>
                     <div className="mt-1 flex min-h-7 items-center justify-between border-t border-border/60 px-2 pt-1 text-[11px] text-muted-foreground">
-                        <span>{ROUTES.some((region) => healthByRegion[region]?.checkedAt) ? t("canvas.routePicker.checkedRecently") : t("canvas.routePicker.onDemand")}</span>
+                        <span>{ROUTES.some((region) => healthByRegion[region]?.checkedAt) ? t("canvas.routePicker.checkedRecently") : t("canvas.routePicker.autoRefresh")}</span>
                         {globalRegion ? <button type="button" className="rounded px-1.5 py-1 transition-colors hover:bg-accent hover:text-foreground" onClick={() => changeRegion(undefined)}>{t("canvas.routePicker.followDefault")}</button> : null}
                     </div>
                 </PopoverPrimitive.Content>
