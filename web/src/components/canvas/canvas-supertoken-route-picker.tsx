@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import type { TFunction } from "i18next";
-import { Check, ChevronDown, Globe2, LoaderCircle, RefreshCw, Route, Zap } from "lucide-react";
+import { Check, ChevronDown, Globe2, LoaderCircle, RefreshCw, Zap } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { useTranslation } from "react-i18next";
 
@@ -52,14 +52,12 @@ export function CanvasSuperTokenRoutePicker({ config, value, onChange, className
             <PopoverPrimitive.Trigger asChild>
                 <button
                     type="button"
-                    className={cn("inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10", className)}
+                    className={cn("inline-flex h-8 max-w-[72px] min-w-0 shrink-0 items-center gap-1 rounded-md bg-transparent px-1 text-xs text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10", className)}
                     aria-label={t("canvas.routePicker.current", { route: routeName(t, activeRegion), status: healthText(t, activeHealth) })}
                 >
-                    <Route className="size-3.5 shrink-0" />
                     <StatusDot health={activeHealth} />
                     <span className="truncate">{routeName(t, activeRegion)}</span>
-                    <span className="shrink-0 opacity-70">{compactHealthText(t, activeHealth)}</span>
-                    <ChevronDown className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-180")} />
+                    <ChevronDown className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")} />
                 </button>
             </PopoverPrimitive.Trigger>
             <PopoverPrimitive.Portal>
@@ -129,13 +127,6 @@ function routeName(t: TFunction, region: SuperTokenRegion) {
 
 function routeFullName(t: TFunction, region: SuperTokenRegion) {
     return t(region === "cn" ? "canvas.routePicker.cn" : "canvas.routePicker.global");
-}
-
-function compactHealthText(t: TFunction, health?: SuperTokenRouteHealth) {
-    if (health?.latencyMs) return `${health.latencyMs}ms`;
-    if (health?.status === "checking") return t("canvas.routePicker.checking");
-    if (health?.status === "unavailable") return t("canvas.routePicker.unavailable");
-    return "";
 }
 
 function healthText(t: TFunction, health?: SuperTokenRouteHealth) {
