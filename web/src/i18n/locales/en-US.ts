@@ -179,6 +179,7 @@ export default {
         results: "Results",
         waiting: "Waiting {{time}}",
         model: "Model",
+        serviceRoute: "Service route",
         generating: "Generating",
         success: "Succeeded",
         failed: "Generation failed",

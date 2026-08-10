@@ -95,7 +95,6 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     const result = {
         ...config,
         model: resolveModelForCapability(config, node?.metadata?.model, mode),
-        supertokenRegion: node?.metadata?.supertokenRegion,
         reasoningEffort: node?.metadata?.reasoningEffort || config.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
         imageResolution: node?.metadata?.imageResolution || config.imageResolution || defaultConfig.imageResolution,

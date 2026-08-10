@@ -44,7 +44,6 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
     return {
         generationType: type,
         model: config.model,
-        supertokenRegion: config.supertokenRegion,
         size: config.size,
         quality: config.quality,
         imageResolution: config.imageResolution,

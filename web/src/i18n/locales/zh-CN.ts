@@ -179,6 +179,7 @@ export default {
         results: "生成结果",
         waiting: "等待 {{time}}",
         model: "模型",
+        serviceRoute: "服务线路",
         generating: "生成中",
         success: "成功",
         failed: "生成失败",

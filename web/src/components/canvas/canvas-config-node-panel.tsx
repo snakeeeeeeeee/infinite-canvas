@@ -12,7 +12,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
-import { CanvasSuperTokenRoutePicker } from "./canvas-supertoken-route-picker";
+import { SuperTokenRoutePicker } from "@/components/supertoken-route-picker";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 type CanvasConfigNodePanelProps = {
@@ -124,7 +124,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
             </div>
 
             <div className="mt-auto flex min-w-0 items-center gap-1.5 cursor-default" onMouseDown={(event) => event.stopPropagation()}>
-                {(mode === "image" || mode === "video") ? <CanvasSuperTokenRoutePicker config={config} value={node.metadata?.supertokenRegion} onChange={(supertokenRegion) => onConfigChange(node.id, { supertokenRegion })} className="max-w-[116px]" /> : null}
+                {(mode === "image" || mode === "video") ? <SuperTokenRoutePicker config={config} className="max-w-[116px]" /> : null}
                 <Button
                     type="primary"
                     className="!h-9 min-w-0 flex-1 !cursor-pointer !rounded-lg"
@@ -165,7 +165,6 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     return {
         ...globalConfig,
         model: resolveModelForCapability(globalConfig, node.metadata?.model, mode),
-        supertokenRegion: node.metadata?.supertokenRegion,
         reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         imageResolution: node.metadata?.imageResolution || globalConfig.imageResolution || defaultConfig.imageResolution,
