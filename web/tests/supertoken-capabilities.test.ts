@@ -157,10 +157,12 @@ describe("SuperToken image catalog", () => {
     });
 
     test("uses explicit per-request output limits instead of model-name suffixes", () => {
-        expect(superTokenImageCapability("gpt-image-2")?.maxOutputsPerRequest).toBe(10);
-        expect(superTokenImageCapability("adobe-gpt-image-2-count")?.maxOutputsPerRequest).toBe(10);
-        expect(superTokenImageCapability("gpt-image-2-count")?.maxOutputsPerRequest).toBe(1);
+        expect(superTokenImageCapability("gpt-image-2")).toMatchObject({ family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
+        expect(superTokenImageCapability("adobe-gpt-image-2-count")).toMatchObject({ family: "gpt-image", provider: "adobe", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
+        expect(superTokenImageCapability("gpt-image-2-count")).toMatchObject({ family: "gpt-image", provider: "third-party", displayResolution: { max: "1.5K" }, maxOutputsPerRequest: 1 });
         expect(superTokenImageCapability("gemini-3.1-flash-image")?.maxOutputsPerRequest).toBe(1);
+        expect(superTokenImageCapability("gemini-3.1-flash-image")).toMatchObject({ family: "gemini", alias: "small-banana", positioning: "fast", operations: ["generation", "edit"] });
+        expect(superTokenImageCapability("gemini-3-pro-image-count")).toMatchObject({ family: "gemini", alias: "big-banana", positioning: "quality", operations: ["generation", "edit"] });
         expect(canUseSuperTokenNativeImageBatch("adobe-gpt-image-2-count", 4)).toBe(true);
         expect(canUseSuperTokenNativeImageBatch("gpt-image-2-count", 4)).toBe(false);
         expect(superTokenImageBatchPlan("gpt-image-2", 15)).toEqual([10, 5]);

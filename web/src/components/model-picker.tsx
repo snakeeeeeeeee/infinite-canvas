@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { ImageModelPicker } from "@/components/image-model-picker";
 import { VideoModelPicker } from "@/components/video-model-picker";
 import { cn } from "@/lib/utils";
 import { modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
@@ -21,6 +22,9 @@ type ModelPickerProps = {
 };
 
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, compact = false, placeholder, onMissingConfig }: ModelPickerProps) {
+    if (capability === "image") {
+        return <ImageModelPicker config={config} value={value} onChange={onChange} className={className} fullWidth={fullWidth} compact={compact} placeholder={placeholder} onMissingConfig={onMissingConfig} />;
+    }
     if (capability === "video") {
         return <VideoModelPicker config={config} value={value} onChange={onChange} className={className} fullWidth={fullWidth} compact={compact} placeholder={placeholder} onMissingConfig={onMissingConfig} />;
     }

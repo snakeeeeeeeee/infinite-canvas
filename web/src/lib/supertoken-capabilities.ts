@@ -3,6 +3,9 @@ import { SUPERTOKEN_BASE_URL } from "@/constant/runtime-config";
 export type SuperTokenRegion = "cn" | "global";
 export type SuperTokenReferenceMode = "frame" | "images" | "media";
 export type SuperTokenAudioPolicy = "optional" | "required" | "unsupported";
+export type SuperTokenImageFamily = "gpt-image" | "gemini";
+export type SuperTokenImageProvider = "azure" | "adobe" | "third-party" | "google";
+export type SuperTokenImagePositioning = "fast" | "quality";
 
 export type SuperTokenReferenceLimits = {
     images: number;
@@ -41,6 +44,11 @@ export type SuperTokenVideoSettings = {
 export type SuperTokenImageCapability = {
     model: string;
     label: string;
+    family: SuperTokenImageFamily;
+    provider: SuperTokenImageProvider;
+    alias?: "small-banana" | "big-banana";
+    positioning?: SuperTokenImagePositioning;
+    displayResolution: { min?: string; max: string };
     operations: Array<"generation" | "edit">;
     maxImages: number;
     maxOutputsPerRequest: number;
@@ -161,12 +169,17 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
 ];
 
 export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
-    { model: "gpt-image-2", label: "GPT Image 2", operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "gpt-image-2-count", label: "GPT Image 2 Count", operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "adobe-gpt-image-2-count", label: "GPT Image 2 Count", operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    { model: "gpt-image-2", label: "GPT Image 2", family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    { model: "gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "third-party", displayResolution: { max: "1.5K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    { model: "adobe-gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "adobe", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
     {
         model: "gemini-3.1-flash-image",
         label: "Gemini 3.1 Flash Image",
+        family: "gemini",
+        provider: "google",
+        alias: "small-banana",
+        positioning: "fast",
+        displayResolution: { max: "4K" },
         operations: ["generation", "edit"],
         maxImages: 10,
         maxOutputsPerRequest: 1,
@@ -178,7 +191,12 @@ export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
     },
     {
         model: "gemini-3-pro-image-count",
-        label: "Gemini 3 Pro Image Count",
+        label: "Gemini 3 Pro Image",
+        family: "gemini",
+        provider: "google",
+        alias: "big-banana",
+        positioning: "quality",
+        displayResolution: { max: "4K" },
         operations: ["generation", "edit"],
         maxImages: 10,
         maxOutputsPerRequest: 1,

@@ -108,7 +108,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                     value={config.model}
                     onChange={(model) => onConfigChange(node.id, mode === "video" ? canvasVideoModelPatch(config, model) : { model })}
                     capability={mode}
-                    compact={mode === "video"}
+                    compact={mode === "video" || mode === "image"}
                     onMissingConfig={() => openConfigDialog(true)}
                     fullWidth
                 />
