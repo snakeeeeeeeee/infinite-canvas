@@ -274,7 +274,7 @@ export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, t
         options.onProgress?.({ ...task });
         if (state.status === "failed") {
             if (isSuperTokenReferenceMediaUnavailable(state.error)) await invalidateMediaUploadCache(task.referenceUploadCacheKeys || []);
-            return { status: "failed" as const, error: state.error?.message || "视频生成失败" };
+            return { status: "failed" as const, error: formatSuperTokenTaskError(state.error, "视频生成失败") };
         }
         if (state.status !== "succeeded") return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs };
         const video = state.result?.videos?.[0];
@@ -318,7 +318,7 @@ async function waitForTask<T>(task: SuperTokenTaskRecord, resourceApiKey: string
             await updateStoredTaskFromRemote(task, state, response.headers["retry-after"]);
             options.onProgress?.({ ...task });
             if (state.status === "succeeded") return state;
-            if (state.status === "failed") throw new Error(state.error?.message || "任务执行失败");
+            if (state.status === "failed") throw new Error(formatSuperTokenTaskError(state.error, "任务执行失败"));
         } catch (error) {
             if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
             if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) {
@@ -366,7 +366,7 @@ async function persistCreatedTask<T>(
         retryAfterMs: parseRetryAfter(retryAfter),
         createdAt: now,
         updatedAt: now,
-        error: response.error?.message,
+        error: response.error ? formatSuperTokenTaskError(response.error, "任务执行失败") : undefined,
         ...(referenceUploadCacheKeys?.length ? { referenceUploadCacheKeys } : {}),
         request,
         context: options.context,
@@ -389,7 +389,7 @@ function toStoredTask<T>(task: SuperTokenTaskRecord, state: TaskResponse<T>, ret
         ...mergeSuperTokenTaskProgress(task, state),
         retryAfterMs: retryAfter === undefined ? task.retryAfterMs : parseRetryAfter(retryAfter),
         updatedAt: Date.now(),
-        error: state.error?.message,
+        error: state.error ? formatSuperTokenTaskError(state.error, "任务执行失败") : undefined,
     };
 }
 
@@ -628,6 +628,12 @@ export function isSuperTokenReferenceMediaUnavailable(value: unknown) {
     if (["invalid_reference_media", "reference_media_expired", "reference_media_not_found", "media_upload_expired", "media_upload_not_found"].includes(code)) return true;
     if (/(reference|media|upload)/.test(code) && /(expired|not_found|missing|deleted)/.test(code)) return true;
     return /(reference|media|upload|素材|引用|媒体|上传)/.test(message) && /(expired|not found|missing|deleted|过期|不存在|丢失|删除)/.test(message);
+}
+
+export function formatSuperTokenTaskError(error: { code?: string; message?: string } | null | undefined, fallback: string) {
+    const message = error?.message?.trim() || fallback;
+    const code = error?.code?.trim();
+    return code ? `${message}\ncode: ${code}` : message;
 }
 
 async function referenceImageFile(image: ReferenceImage) {

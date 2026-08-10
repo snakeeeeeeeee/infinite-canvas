@@ -32,6 +32,8 @@ describe("SuperToken channel configuration", () => {
         expect(defaultConfig.models).toEqual([]);
         expect(defaultConfig.imageModel).toBe("");
         expect(defaultConfig.videoModel).toBe("");
+        expect(defaultConfig.count).toBe("1");
+        expect(defaultConfig.canvasImageCount).toBe("1");
     });
 
     test("enables SuperToken image and video models independently", () => {

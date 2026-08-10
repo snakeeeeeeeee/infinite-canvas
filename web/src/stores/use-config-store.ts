@@ -112,7 +112,7 @@ export const defaultConfig: AiConfig = {
     size: "1:1",
     background: "",
     count: "1",
-    canvasImageCount: "3",
+    canvasImageCount: "1",
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -266,7 +266,7 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         videoReferenceMode: config.videoReferenceMode || "frame",
-                        canvasImageCount: config.canvasImageCount || "3",
+                        canvasImageCount: config.canvasImageCount || defaultConfig.canvasImageCount,
                     },
                 };
             },

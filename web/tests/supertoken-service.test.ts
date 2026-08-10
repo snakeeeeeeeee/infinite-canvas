@@ -22,6 +22,7 @@ const {
     buildSuperTokenImageOutput,
     buildSuperTokenMediaUploadFiles,
     buildSuperTokenVideoPayload,
+    formatSuperTokenTaskError,
     isSuperTokenMediaUploadReusable,
     isSuperTokenReferenceMediaUnavailable,
     mergeSuperTokenTaskProgress,
@@ -186,6 +187,20 @@ describe("SuperToken request mapping", () => {
         expect(isSuperTokenReferenceMediaUnavailable(new Error("确认媒体上传失败：upload not found"))).toBe(true);
         expect(isSuperTokenReferenceMediaUnavailable({ code: "invalid_reference_media_duration", message: "reference video exceeds 15 seconds" })).toBe(false);
         expect(isSuperTokenReferenceMediaUnavailable({ code: "upstream_unavailable", message: "generation service unavailable" })).toBe(false);
+    });
+
+    test("keeps the task error message and code for user-facing failures", () => {
+        expect(
+            formatSuperTokenTaskError(
+                {
+                    code: "new_api_error",
+                    message: 'adobe content rejected: status 451 {"error_code":"image_unsafe","message":"The generated images appear to be unsafe."}',
+                },
+                "任务执行失败",
+            ),
+        ).toBe('adobe content rejected: status 451 {"error_code":"image_unsafe","message":"The generated images appear to be unsafe."}\ncode: new_api_error');
+        expect(formatSuperTokenTaskError({ message: "plain failure" }, "任务执行失败")).toBe("plain failure");
+        expect(formatSuperTokenTaskError(null, "任务执行失败")).toBe("任务执行失败");
     });
 });
 

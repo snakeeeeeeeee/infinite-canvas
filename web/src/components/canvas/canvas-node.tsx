@@ -516,8 +516,10 @@ function LoadingContent({ node, theme }: Pick<NodeContentRendererProps, "node" |
 function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry">) {
     const { t } = useTranslation();
     return (
-        <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300">{node.metadata?.errorDetails || t("canvas.node.failed")}</div>
+        <div className="flex w-full max-w-[82%] flex-col items-center gap-3 px-5 text-center">
+            <div className="thin-scrollbar max-h-28 w-full overflow-y-auto" onWheel={(event) => event.stopPropagation()}>
+                <FailureDetails details={node.metadata?.errorDetails} fallback={t("canvas.node.failed")} theme={theme} />
+            </div>
             <button
                 type="button"
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
@@ -531,6 +533,24 @@ function ErrorContent({ node, theme, onRetry }: Pick<NodeContentRendererProps, "
                 <RefreshCw className="size-3.5" />
                 {t("canvas.node.retry")}
             </button>
+        </div>
+    );
+}
+
+function FailureDetails({ details, fallback, theme }: { details?: string; fallback: string; theme: NodeContentRendererProps["theme"] }) {
+    const value = (details || fallback).trim();
+    const codeMatch = value.match(/(?:^|\n)code:\s*([^\n]+)/i);
+    const message = codeMatch ? value.replace(codeMatch[0], "").trim() : value;
+    return (
+        <div className="flex min-w-0 flex-col items-center gap-1.5">
+            <div className="w-full whitespace-pre-wrap break-words text-xs leading-5" style={{ color: theme.node.error }}>
+                {message || fallback}
+            </div>
+            {codeMatch ? (
+                <div className="max-w-full break-all font-mono text-[10px] leading-4" style={{ color: theme.node.muted }}>
+                    code: {codeMatch[1].trim()}
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -877,7 +897,9 @@ function ImageSlotStatus({ image }: { image?: CanvasNodeImage }) {
     if (failed)
         return (
             <div className="flex h-full w-full items-center justify-center px-6 text-center" style={{ background: theme.node.fill, color: theme.node.text }}>
-                <span className="text-xs leading-5">{image.errorDetails || t("canvas.node.failed")}</span>
+                <div className="thin-scrollbar max-h-[55%] w-full overflow-y-auto" onWheel={(event) => event.stopPropagation()}>
+                    <FailureDetails details={image.errorDetails} fallback={t("canvas.node.failed")} theme={theme} />
+                </div>
             </div>
         );
     return (
