@@ -22,8 +22,11 @@ const {
     buildSuperTokenImageOutput,
     buildSuperTokenMediaUploadFiles,
     buildSuperTokenVideoPayload,
+    isSuperTokenMediaUploadReusable,
+    isSuperTokenReferenceMediaUnavailable,
     mergeSuperTokenTaskProgress,
     parseSuperTokenRetryAfter,
+    superTokenMediaUploadCacheKey,
     superTokenImageSlotIdempotencyKey,
 } = await import("../src/services/api/supertoken");
 
@@ -154,9 +157,35 @@ describe("SuperToken request mapping", () => {
 
     test("maps media upload metadata without file contents or keys", () => {
         const files = buildSuperTokenMediaUploadFiles([
-            { clientId: "image-1", kind: "image", name: "start.png", type: "", blob: new Blob(["image"], { type: "image/png" }) },
+            { clientId: "image-1", kind: "image", name: "start.png", type: "", blob: new Blob(["image"], { type: "image/png" }), cacheKey: "private-cache-key" },
         ]);
         expect(files).toEqual([{ client_id: "image-1", kind: "image", filename: "start.png", mime_type: "image/png", size_bytes: 5 }]);
+    });
+
+    test("refreshes temporary media uploads within the 30 minute safety window", () => {
+        const now = Date.UTC(2026, 7, 10, 6, 0, 0);
+        const nowSeconds = Math.floor(now / 1000);
+        expect(isSuperTokenMediaUploadReusable({ url: "https://img.example/fresh.mp4", temporary: true, expires_at: nowSeconds + 1801 }, now)).toBe(true);
+        expect(isSuperTokenMediaUploadReusable({ url: "https://img.example/boundary.mp4", temporary: true, expires_at: nowSeconds + 1800 }, now)).toBe(false);
+        expect(isSuperTokenMediaUploadReusable({ url: "https://img.example/expired.mp4", temporary: true, expires_at: nowSeconds - 1 }, now)).toBe(false);
+        expect(isSuperTokenMediaUploadReusable({ url: "https://img.example/permanent.mp4", temporary: false, expires_at: 0 }, now)).toBe(true);
+    });
+
+    test("isolates upload caches by channel, endpoint, and local storage key", () => {
+        const first = superTokenMediaUploadCacheKey("channel-1", "https://HK.SuperToken.cc/", "video:1");
+        expect(first).toBe("channel-1:https://hk.supertoken.cc:video:1");
+        expect(superTokenMediaUploadCacheKey("channel-2", "https://hk.supertoken.cc", "video:1")).not.toBe(first);
+        expect(superTokenMediaUploadCacheKey("channel-1", "https://api.supertoken.cc", "video:1")).not.toBe(first);
+        expect(superTokenMediaUploadCacheKey("channel-1", "https://hk.supertoken.cc", "video:2")).not.toBe(first);
+    });
+
+    test("retries only missing or expired reference media errors", () => {
+        expect(isSuperTokenReferenceMediaUnavailable({ error: { code: "reference_media_expired", message: "reference expired" } })).toBe(true);
+        expect(isSuperTokenReferenceMediaUnavailable({ detail: { code: "invalid_reference_media", message: "staged media is missing or incomplete" } })).toBe(true);
+        expect(isSuperTokenReferenceMediaUnavailable({ code: "video_task_failed", message: "reference media not found" })).toBe(true);
+        expect(isSuperTokenReferenceMediaUnavailable(new Error("确认媒体上传失败：upload not found"))).toBe(true);
+        expect(isSuperTokenReferenceMediaUnavailable({ code: "invalid_reference_media_duration", message: "reference video exceeds 15 seconds" })).toBe(false);
+        expect(isSuperTokenReferenceMediaUnavailable({ code: "upstream_unavailable", message: "generation service unavailable" })).toBe(false);
     });
 });
 

@@ -59,6 +59,7 @@ export type SuperTokenTaskRecord = {
     error?: string;
     resultUrls?: string[];
     resultStorageKeys?: string[];
+    referenceUploadCacheKeys?: string[];
     request?: Record<string, unknown>;
     context?: Record<string, string | number | boolean>;
 };
@@ -86,12 +87,15 @@ type ImageRequest = {
     count?: number;
 };
 
-export type MediaUploadInput = { clientId: string; kind: "image" | "video" | "audio"; name: string; type: string; blob: Blob };
-type MediaUploadSession = { id: string; client_id?: string; kind: string; method: string; upload_url: string; headers?: Record<string, string> };
-type MediaUploadResult = { id: string; client_id?: string; kind: string; url: string; mime_type?: string };
+export type MediaUploadInput = { clientId: string; kind: "image" | "video" | "audio"; name: string; type: string; blob: Blob; cacheKey?: string };
+type MediaUploadSession = { id: string; client_id?: string; kind: string; method: string; upload_url: string; headers?: Record<string, string>; expires_at: number };
+type MediaUploadResult = { id: string; client_id?: string; kind: string; url: string; mime_type?: string; size_bytes?: number; temporary: boolean; expires_at: number };
+type CachedMediaUpload = Pick<MediaUploadResult, "id" | "client_id" | "kind" | "url" | "mime_type" | "size_bytes" | "temporary" | "expires_at">;
 
 const taskStore = localforage.createInstance({ name: "infinite-canvas", storeName: "supertoken_async_tasks" });
+const mediaUploadStore = localforage.createInstance({ name: "infinite-canvas", storeName: "supertoken_media_uploads" });
 const DEFAULT_RETRY_MS = 2000;
+export const SUPERTOKEN_MEDIA_REFRESH_MARGIN_SECONDS = 30 * 60;
 
 export async function fetchSuperTokenModels(baseUrl: string, apiKey: string, signal?: AbortSignal) {
     if (!apiKey.trim()) throw new Error("请先填写对应的 Model API Key");
@@ -221,19 +225,43 @@ export async function createSuperTokenVideoTask(
     const selectionError = validateSuperTokenVideoSelection({ capability, duration, aspectRatio, referenceMode, images: references.length, videos: videoReferences.length, audios: audioReferences.length, generateAudio });
     if (selectionError) throw new Error(selectionError);
 
-    const uploadedImages = await resolveVideoSources(config, references, "image", options.signal);
-    const uploadedVideos = await resolveVideoSources(config, videoReferences, "video", options.signal);
-    const uploadedAudios = await resolveVideoSources(config, audioReferences, "audio", options.signal);
-    const payload = buildSuperTokenVideoPayload({ model, prompt, capability, referenceMode, duration, aspectRatio, generateAudio, images: uploadedImages, videos: uploadedVideos, audios: uploadedAudios });
-
     const idempotencyKey = options.idempotencyKey || `canvas-video-${nanoid()}`;
     const clientReferenceId = options.clientReferenceId || idempotencyKey;
-    const response = await axios.post<TaskResponse<{ videos: TaskResultVideo[] }>>(
-        apiUrl(config.baseUrl, "/video/tasks"),
-        { ...payload, client_reference_id: clientReferenceId },
-        { headers: { ...authHeaders(config.apiKey), "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, signal: options.signal },
+    const referenceUploadCacheKeys = mediaUploadCacheKeys(config, [...references, ...videoReferences, ...audioReferences]);
+    const submit = async (forceUpload = false) => {
+        const submissionIdempotencyKey = forceUpload ? `${idempotencyKey}-r1` : idempotencyKey;
+        const uploadedImages = await resolveVideoSources(config, references, "image", options.signal, forceUpload);
+        const uploadedVideos = await resolveVideoSources(config, videoReferences, "video", options.signal, forceUpload);
+        const uploadedAudios = await resolveVideoSources(config, audioReferences, "audio", options.signal, forceUpload);
+        const payload = buildSuperTokenVideoPayload({ model, prompt, capability, referenceMode, duration, aspectRatio, generateAudio, images: uploadedImages, videos: uploadedVideos, audios: uploadedAudios });
+        const response = await axios.post<TaskResponse<{ videos: TaskResultVideo[] }>>(
+            apiUrl(config.baseUrl, "/video/tasks"),
+            { ...payload, client_reference_id: clientReferenceId },
+            { headers: { ...authHeaders(config.apiKey), "Content-Type": "application/json", "Idempotency-Key": submissionIdempotencyKey }, signal: options.signal },
+        );
+        return { idempotencyKey: submissionIdempotencyKey, payload, response };
+    };
+    let submitted: Awaited<ReturnType<typeof submit>>;
+    try {
+        submitted = await submit();
+    } catch (error) {
+        if (!referenceUploadCacheKeys.length || !isSuperTokenReferenceMediaUnavailable(error)) throw error;
+        await invalidateMediaUploadCache(referenceUploadCacheKeys);
+        submitted = await submit(true);
+    }
+    return persistCreatedTask(
+        "video",
+        config,
+        selectedModel,
+        submitted.response.data,
+        submitted.idempotencyKey,
+        clientReferenceId,
+        submitted.response.headers["retry-after"],
+        options,
+        model,
+        submitted.payload,
+        referenceUploadCacheKeys,
     );
-    return persistCreatedTask("video", config, selectedModel, response.data, idempotencyKey, clientReferenceId, response.headers["retry-after"], options, model, payload);
 }
 
 export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, task: SuperTokenTaskRecord, options: RequestOptions = {}) {
@@ -244,7 +272,10 @@ export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, t
         const state = response.data;
         await updateStoredTaskFromRemote(task, state, response.headers["retry-after"]);
         options.onProgress?.({ ...task });
-        if (state.status === "failed") return { status: "failed" as const, error: state.error?.message || "视频生成失败" };
+        if (state.status === "failed") {
+            if (isSuperTokenReferenceMediaUnavailable(state.error)) await invalidateMediaUploadCache(task.referenceUploadCacheKeys || []);
+            return { status: "failed" as const, error: state.error?.message || "视频生成失败" };
+        }
         if (state.status !== "succeeded") return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs };
         const video = state.result?.videos?.[0];
         if (!video?.url) {
@@ -317,6 +348,7 @@ async function persistCreatedTask<T>(
     options: RequestOptions,
     remoteModel = config.model,
     request?: Record<string, unknown>,
+    referenceUploadCacheKeys?: string[],
 ) {
     if (!response.id) throw new Error("接口没有返回任务 ID");
     const now = Date.now();
@@ -335,6 +367,7 @@ async function persistCreatedTask<T>(
         createdAt: now,
         updatedAt: now,
         error: response.error?.message,
+        ...(referenceUploadCacheKeys?.length ? { referenceUploadCacheKeys } : {}),
         request,
         context: options.context,
     };
@@ -458,11 +491,36 @@ async function materializeVideoResult(task: SuperTokenTaskRecord, video: TaskRes
     });
 }
 
-async function resolveVideoSources(config: SuperTokenRequestConfig, sources: Array<ReferenceImage | ReferenceVideo | ReferenceAudio>, kind: MediaUploadInput["kind"], signal?: AbortSignal) {
+async function resolveVideoSources(
+    config: SuperTokenRequestConfig,
+    sources: Array<ReferenceImage | ReferenceVideo | ReferenceAudio>,
+    kind: MediaUploadInput["kind"],
+    signal?: AbortSignal,
+    forceUpload = false,
+) {
     if (!sources.length) return [];
     const resolved = await Promise.all(
         sources.map(async (source, index) => {
-            const directUrl = "url" in source ? source.url || "" : "";
+            const cacheKey = source.storageKey ? superTokenMediaUploadCacheKey(config.channelId, config.baseUrl, source.storageKey) : "";
+            const localBlob = await storedReferenceBlob(source, kind);
+            if (cacheKey && !forceUpload) {
+                const cached = await readMediaUploadCache(cacheKey);
+                if (cached) return { url: cached.url, name: sourceName(source.name, kind, index) };
+            }
+            if (localBlob) {
+                return {
+                    upload: {
+                        clientId: `${kind}-${index + 1}-${source.id}`,
+                        kind,
+                        name: source.name || `${kind}-${index + 1}`,
+                        type: source.type || localBlob.type || defaultMime(kind),
+                        blob: localBlob,
+                        ...(cacheKey ? { cacheKey } : {}),
+                    },
+                    index,
+                };
+            }
+            const directUrl = referenceRemoteUrl(source);
             if (isHttpUrl(directUrl)) return { url: directUrl, name: sourceName(source.name, kind, index) };
             const blob = await referenceBlob(source, kind);
             return { upload: { clientId: `${kind}-${index + 1}-${source.id}`, kind, name: source.name || `${kind}-${index + 1}`, type: source.type || blob.type || defaultMime(kind), blob }, index };
@@ -471,6 +529,13 @@ async function resolveVideoSources(config: SuperTokenRequestConfig, sources: Arr
     const uploads = resolved.flatMap((item) => ("upload" in item && item.upload ? [item.upload] : []));
     const uploaded = uploads.length ? await uploadSuperTokenMedia(config, uploads, signal) : [];
     const uploadedByClient = new Map(uploaded.map((item) => [item.client_id, item]));
+    await Promise.all(
+        uploads.map(async (input) => {
+            if (!input.cacheKey) return;
+            const result = uploadedByClient.get(input.clientId);
+            if (result?.url) await writeMediaUploadCache(input.cacheKey, result);
+        }),
+    );
     return resolved.map((item, index): { url: string; name: string } => {
         if (typeof item.url === "string") return { url: item.url, name: item.name || sourceName("", kind, index) };
         const result = uploadedByClient.get(item.upload!.clientId);
@@ -516,6 +581,55 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
     return complete.data.data || [];
 }
 
+export function superTokenMediaUploadCacheKey(channelId: string, baseUrl: string, storageKey: string) {
+    return `${channelId}:${baseUrl.trim().replace(/\/+$/, "").toLowerCase()}:${storageKey}`;
+}
+
+export function isSuperTokenMediaUploadReusable(upload: { url?: string; temporary?: boolean; expires_at?: number }, now = Date.now()) {
+    if (!upload.url) return false;
+    if (upload.temporary === false) return true;
+    const expiresAt = Number(upload.expires_at);
+    return Number.isFinite(expiresAt) && expiresAt > Math.floor(now / 1000) + SUPERTOKEN_MEDIA_REFRESH_MARGIN_SECONDS;
+}
+
+async function readMediaUploadCache(cacheKey: string) {
+    const cached = await mediaUploadStore.getItem<CachedMediaUpload>(cacheKey);
+    if (cached && isSuperTokenMediaUploadReusable(cached)) return cached;
+    if (cached) await mediaUploadStore.removeItem(cacheKey);
+    return null;
+}
+
+async function writeMediaUploadCache(cacheKey: string, upload: MediaUploadResult) {
+    if (isSuperTokenMediaUploadReusable(upload)) await mediaUploadStore.setItem(cacheKey, upload);
+    else await mediaUploadStore.removeItem(cacheKey);
+}
+
+async function invalidateMediaUploadCache(cacheKeys: string[]) {
+    await Promise.all(Array.from(new Set(cacheKeys)).map((key) => mediaUploadStore.removeItem(key)));
+}
+
+function mediaUploadCacheKeys(config: SuperTokenRequestConfig, sources: Array<ReferenceImage | ReferenceVideo | ReferenceAudio>) {
+    return Array.from(
+        new Set(
+            sources
+                .map((source) => source.storageKey)
+                .filter((storageKey): storageKey is string => Boolean(storageKey))
+                .map((storageKey) => superTokenMediaUploadCacheKey(config.channelId, config.baseUrl, storageKey)),
+        ),
+    );
+}
+
+export function isSuperTokenReferenceMediaUnavailable(value: unknown) {
+    const payload = axios.isAxiosError(value) ? value.response?.data : value;
+    const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const nested = [record.error, record.detail].find((item) => item && typeof item === "object") as Record<string, unknown> | undefined;
+    const code = String(nested?.code || record.code || "").trim().toLowerCase();
+    const message = String(nested?.message || record.message || (value instanceof Error ? value.message : "")).trim().toLowerCase();
+    if (["invalid_reference_media", "reference_media_expired", "reference_media_not_found", "media_upload_expired", "media_upload_not_found"].includes(code)) return true;
+    if (/(reference|media|upload)/.test(code) && /(expired|not_found|missing|deleted)/.test(code)) return true;
+    return /(reference|media|upload|素材|引用|媒体|上传)/.test(message) && /(expired|not found|missing|deleted|过期|不存在|丢失|删除)/.test(message);
+}
+
 async function referenceImageFile(image: ReferenceImage) {
     const dataUrl = await imageToDataUrl(image);
     if (!dataUrl) throw new Error(`无法读取参考图：${image.name}`);
@@ -524,13 +638,21 @@ async function referenceImageFile(image: ReferenceImage) {
 
 async function referenceBlob(source: ReferenceImage | ReferenceVideo | ReferenceAudio, kind: MediaUploadInput["kind"]) {
     if (kind === "image") return fetchBlob(await imageToDataUrl(source as ReferenceImage));
-    if (source.storageKey) {
-        const blob = await getMediaBlob(source.storageKey);
-        if (blob) return blob;
-    }
+    const stored = await storedReferenceBlob(source, kind);
+    if (stored) return stored;
     const url = "url" in source ? source.url : "";
     if (url) return fetchBlob(url);
-    throw new Error(`无法读取本地${kind === "video" ? "视频" : "音频"}参考素材`);
+    throw new Error(`无法读取本地${kind === "video" ? "视频" : kind === "audio" ? "音频" : "图片"}参考素材，请重新选择或从 WebDAV 恢复`);
+}
+
+async function storedReferenceBlob(source: ReferenceImage | ReferenceVideo | ReferenceAudio, kind: MediaUploadInput["kind"]) {
+    if (!source.storageKey) return null;
+    return kind === "image" ? getImageBlob(source.storageKey) : getMediaBlob(source.storageKey);
+}
+
+function referenceRemoteUrl(source: ReferenceImage | ReferenceVideo | ReferenceAudio) {
+    if ("url" in source && source.url) return source.url;
+    return "dataUrl" in source && isHttpUrl(source.dataUrl) ? source.dataUrl : "";
 }
 
 async function fetchBlob(url: string) {
