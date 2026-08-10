@@ -67,6 +67,7 @@ export type AiConfig = {
     background: string;
     count: string;
     canvasImageCount: string;
+    supertokenRegion?: SuperTokenRegion;
 };
 
 export type WebdavSyncConfig = {
@@ -421,7 +422,7 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
         return {
             ...config,
             model: modelOptionName(value || config.model),
-            baseUrl: superTokenBaseUrl(channel.supertoken?.region),
+            baseUrl: superTokenBaseUrl(config.supertokenRegion || channel.supertoken?.region),
             apiKey: capability === "video" ? channel.supertoken?.videoApiKey || "" : channel.supertoken?.imageApiKey || "",
             apiFormat: "openai" as const,
             provider: "supertoken" as const,

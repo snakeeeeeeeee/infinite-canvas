@@ -79,7 +79,7 @@ describe("SuperToken channel configuration", () => {
         expect(request).toMatchObject({ provider: "custom", baseUrl: "https://legacy.example.com/v1", apiKey: "legacy-key", apiFormat: "gemini" });
     });
 
-    test("routes image and video models to separate keys and a fixed region URL", () => {
+    test("routes image and video models to separate keys with an optional Canvas route override", () => {
         const channel = createSuperTokenChannel({
             id: "supertoken",
             baseUrl: "https://untrusted.example.com",
@@ -98,6 +98,7 @@ describe("SuperToken channel configuration", () => {
         expect(channel.baseUrl).toBe("https://api.supertoken.cc");
         expect(image).toMatchObject({ provider: "supertoken", apiKey: "image-key", resourceApiKey: "resource-key", baseUrl: "https://api.supertoken.cc" });
         expect(video).toMatchObject({ provider: "supertoken", apiKey: "video-key", resourceApiKey: "resource-key", baseUrl: "https://api.supertoken.cc" });
+        expect(resolveModelRequestConfig({ ...config, supertokenRegion: "cn" }, encodeChannelModel(channel.id, "gpt-image-2"))).toMatchObject({ provider: "supertoken", baseUrl: "https://hk.supertoken.cc" });
         expect(superTokenVideoConfigPatch(config, encodeChannelModel(channel.id, "adobe-kling-3.0"), true)).toEqual({ vquality: "720", size: "16:9", videoSeconds: "3", videoReferenceMode: "frame", videoGenerateAudio: "true" });
     });
 

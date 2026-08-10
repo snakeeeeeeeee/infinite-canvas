@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { superTokenReferenceDurationError } from "@/lib/seedance-video";
+import { markSuperTokenRouteUnavailable } from "@/services/api/supertoken-route-health";
 import {
     normalizeSuperTokenVideoSettings,
     resolveSuperTokenVideoModel,
@@ -141,32 +142,37 @@ export async function requestSuperTokenImages(config: SuperTokenRequestConfig, r
         output,
     };
     let response;
-    if (operation === "edit" && !canUseImageUrls(request.references, request.mask)) {
-        const form = new FormData();
-        form.set("model", config.model);
-        form.set("operation", operation);
-        form.set("prompt", request.prompt);
-        form.set("n", "1");
-        form.set("client_reference_id", clientReferenceId);
-        appendImageOutput(form, output);
-        const files = await Promise.all(request.references.map(referenceImageFile));
-        files.forEach((file) => form.append("image", file));
-        if (request.mask) form.set("mask", await referenceImageFile(request.mask));
-        response = await axios.post<TaskResponse<{ images: TaskResultImage[] }>>(apiUrl(config.baseUrl, "/image/tasks"), form, {
-            headers: { ...authHeaders(config.apiKey), "Idempotency-Key": idempotencyKey },
-            signal: options.signal,
-        });
-    } else {
-        const input = {
-            prompt: request.prompt,
-            ...(request.references.length ? { images: request.references.map((item) => ({ url: item.url })) } : {}),
-            ...(request.mask?.url ? { mask: { url: request.mask.url } } : {}),
-        };
-        response = await axios.post<TaskResponse<{ images: TaskResultImage[] }>>(
-            apiUrl(config.baseUrl, "/image/tasks"),
-            { model: config.model, operation, input, output, client_reference_id: clientReferenceId },
-            { headers: { ...authHeaders(config.apiKey), "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, signal: options.signal },
-        );
+    try {
+        if (operation === "edit" && !canUseImageUrls(request.references, request.mask)) {
+            const form = new FormData();
+            form.set("model", config.model);
+            form.set("operation", operation);
+            form.set("prompt", request.prompt);
+            form.set("n", "1");
+            form.set("client_reference_id", clientReferenceId);
+            appendImageOutput(form, output);
+            const files = await Promise.all(request.references.map(referenceImageFile));
+            files.forEach((file) => form.append("image", file));
+            if (request.mask) form.set("mask", await referenceImageFile(request.mask));
+            response = await axios.post<TaskResponse<{ images: TaskResultImage[] }>>(apiUrl(config.baseUrl, "/image/tasks"), form, {
+                headers: { ...authHeaders(config.apiKey), "Idempotency-Key": idempotencyKey },
+                signal: options.signal,
+            });
+        } else {
+            const input = {
+                prompt: request.prompt,
+                ...(request.references.length ? { images: request.references.map((item) => ({ url: item.url })) } : {}),
+                ...(request.mask?.url ? { mask: { url: request.mask.url } } : {}),
+            };
+            response = await axios.post<TaskResponse<{ images: TaskResultImage[] }>>(
+                apiUrl(config.baseUrl, "/image/tasks"),
+                { model: config.model, operation, input, output, client_reference_id: clientReferenceId },
+                { headers: { ...authHeaders(config.apiKey), "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, signal: options.signal },
+            );
+        }
+    } catch (error) {
+        reportRouteFailure(config.baseUrl, config.resourceApiKey, error);
+        throw error;
     }
     const task = await persistCreatedTask("image", config, config.model, response.data, idempotencyKey, clientReferenceId, response.headers["retry-after"], options, config.model, requestSnapshot);
     return resumeSuperTokenImageTask(config, task, options.pollSignal ? { ...options, signal: options.pollSignal } : options);
@@ -245,6 +251,7 @@ export async function createSuperTokenVideoTask(
     try {
         submitted = await submit();
     } catch (error) {
+        reportRouteFailure(config.baseUrl, config.resourceApiKey, error);
         if (!referenceUploadCacheKeys.length || !isSuperTokenReferenceMediaUnavailable(error)) throw error;
         await invalidateMediaUploadCache(referenceUploadCacheKeys);
         submitted = await submit(true);
@@ -286,6 +293,7 @@ export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, t
         return { status: "completed" as const, result: { stored } };
     } catch (error) {
         if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
+        reportRouteFailure(task.baseUrl, config.resourceApiKey, error);
         if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs || DEFAULT_RETRY_MS };
         return { status: "failed" as const, error: readApiError(error) };
     }
@@ -321,6 +329,7 @@ async function waitForTask<T>(task: SuperTokenTaskRecord, resourceApiKey: string
             if (state.status === "failed") throw new Error(formatSuperTokenTaskError(state.error, "任务执行失败"));
         } catch (error) {
             if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
+            reportRouteFailure(task.baseUrl, resourceApiKey, error);
             if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) {
                 transientErrors += 1;
                 await delay(Math.min(15000, DEFAULT_RETRY_MS * 2 ** Math.min(transientErrors, 3)), options.signal);
@@ -553,7 +562,7 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
             { headers: { ...authHeaders(config.resourceApiKey), "Content-Type": "application/json" }, signal },
         );
     } catch (error) {
-        throw requestStageError("创建媒体上传会话失败", error);
+        throw requestStageError("创建媒体上传会话失败", error, config.baseUrl, config.resourceApiKey);
     }
     const sessions = create.data.data || [];
     if (sessions.length !== inputs.length) throw new Error("媒体上传会话数量与文件数量不一致");
@@ -576,7 +585,7 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
             { headers: { ...authHeaders(config.resourceApiKey), "Content-Type": "application/json" }, signal },
         );
     } catch (error) {
-        throw requestStageError("确认媒体上传失败", error);
+        throw requestStageError("确认媒体上传失败", error, config.baseUrl, config.resourceApiKey);
     }
     return complete.data.data || [];
 }
@@ -801,9 +810,16 @@ function readApiError(error: unknown) {
     return error instanceof Error ? error.message : "SuperToken 请求失败";
 }
 
-function requestStageError(stage: string, error: unknown) {
+function requestStageError(stage: string, error: unknown, baseUrl?: string, resourceApiKey?: string) {
     if (isAbort(error)) return new DOMException("Aborted", "AbortError");
+    if (baseUrl) reportRouteFailure(baseUrl, resourceApiKey || "", error);
     return new Error(`${stage}：${readApiError(error)}`);
+}
+
+function reportRouteFailure(baseUrl: string, resourceApiKey: string, error: unknown) {
+    if (!axios.isAxiosError(error) || isAbort(error)) return;
+    const status = error.response?.status;
+    if (!error.response || status === 408 || status === 502 || status === 504) markSuperTokenRouteUnavailable(baseUrl, resourceApiKey);
 }
 
 function delay(ms: number, signal?: AbortSignal) {

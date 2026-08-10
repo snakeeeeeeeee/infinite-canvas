@@ -12,6 +12,7 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
+import { CanvasSuperTokenRoutePicker } from "./canvas-supertoken-route-picker";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 type CanvasConfigNodePanelProps = {
@@ -122,29 +123,31 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                 )}
             </div>
 
-            <Button
-                type="primary"
-                className="mt-auto !h-9 !w-full !cursor-pointer !rounded-lg"
-                danger={isRunning}
-                disabled={!isRunning && !canGenerate}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))}
-            >
-                <span className="inline-flex items-center gap-1.5">
-                    {isRunning ? (
-                        <>
-                            <LoaderCircle className="size-4 animate-spin" />
-                            <Square className="size-3.5 fill-current" />
-                            <span>{t("canvas.configNode.stop")}</span>
-                        </>
-                    ) : (
-                        <>
-                            <Play className="size-4" />
-                            <span>{t("canvas.configNode.generate")}</span>
-                        </>
-                    )}
-                </span>
-            </Button>
+            <div className="mt-auto flex min-w-0 items-center gap-1.5 cursor-default" onMouseDown={(event) => event.stopPropagation()}>
+                {(mode === "image" || mode === "video") ? <CanvasSuperTokenRoutePicker config={config} value={node.metadata?.supertokenRegion} onChange={(supertokenRegion) => onConfigChange(node.id, { supertokenRegion })} className="max-w-[116px]" /> : null}
+                <Button
+                    type="primary"
+                    className="!h-9 min-w-0 flex-1 !cursor-pointer !rounded-lg"
+                    danger={isRunning}
+                    disabled={!isRunning && !canGenerate}
+                    onClick={() => (isRunning ? onStop(node.id) : onGenerate(node.id))}
+                >
+                    <span className="inline-flex items-center gap-1.5">
+                        {isRunning ? (
+                            <>
+                                <LoaderCircle className="size-4 animate-spin" />
+                                <Square className="size-3.5 fill-current" />
+                                <span>{t("canvas.configNode.stop")}</span>
+                            </>
+                        ) : (
+                            <>
+                                <Play className="size-4" />
+                                <span>{t("canvas.configNode.generate")}</span>
+                            </>
+                        )}
+                    </span>
+                </Button>
+            </div>
         </div>
     );
 }
@@ -162,6 +165,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     return {
         ...globalConfig,
         model: resolveModelForCapability(globalConfig, node.metadata?.model, mode),
+        supertokenRegion: node.metadata?.supertokenRegion,
         reasoningEffort: node.metadata?.reasoningEffort || globalConfig.reasoningEffort || defaultConfig.reasoningEffort,
         quality: node.metadata?.quality || globalConfig.quality || defaultConfig.quality,
         imageResolution: node.metadata?.imageResolution || globalConfig.imageResolution || defaultConfig.imageResolution,

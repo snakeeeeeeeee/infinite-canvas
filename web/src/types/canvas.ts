@@ -51,6 +51,7 @@ export type CanvasNodeMetadata = {
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
     model?: string;
+    supertokenRegion?: "cn" | "global";
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;
     quality?: string;
