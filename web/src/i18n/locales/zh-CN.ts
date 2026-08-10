@@ -37,7 +37,6 @@ export default {
         model: { select: "选择模型", configure: "配置渠道", assign: "请先在渠道里为{{capability}}指定模型", noMatch: "暂无匹配的{{capability}}模型", addFirst: "请先到配置里添加渠道和模型", capabilities: { image: "生图", video: "视频", text: "文本", audio: "音频" } },
         videoModelPicker: {
             title: "选择视频模型",
-            filterHint: "按能力筛选",
             general: "通用创作",
             human: "真人出镜",
             faceSupported: "支持真人",

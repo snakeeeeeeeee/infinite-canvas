@@ -15,13 +15,14 @@ type ModelPickerProps = {
     capability?: ModelCapability;
     className?: string;
     fullWidth?: boolean;
+    compact?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder, onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, compact = false, placeholder, onMissingConfig }: ModelPickerProps) {
     if (capability === "video") {
-        return <VideoModelPicker config={config} value={value} onChange={onChange} className={className} fullWidth={fullWidth} placeholder={placeholder} onMissingConfig={onMissingConfig} />;
+        return <VideoModelPicker config={config} value={value} onChange={onChange} className={className} fullWidth={fullWidth} compact={compact} placeholder={placeholder} onMissingConfig={onMissingConfig} />;
     }
     return <SimpleModelPicker config={config} value={value} onChange={onChange} capability={capability} className={className} fullWidth={fullWidth} placeholder={placeholder} onMissingConfig={onMissingConfig} />;
 }

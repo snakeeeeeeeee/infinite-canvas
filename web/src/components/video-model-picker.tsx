@@ -15,6 +15,7 @@ type VideoModelPickerProps = {
     onChange: (model: string) => void;
     className?: string;
     fullWidth?: boolean;
+    compact?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
 };
@@ -37,7 +38,7 @@ type VideoOption = {
 
 const FAMILY_IDS: FamilyId[] = ["seedance", "kling", "minimax", "other"];
 
-export function VideoModelPicker({ config, value, onChange, className, fullWidth = false, placeholder, onMissingConfig }: VideoModelPickerProps) {
+export function VideoModelPicker({ config, value, onChange, className, fullWidth = false, compact = false, placeholder, onMissingConfig }: VideoModelPickerProps) {
     const { t } = useTranslation();
     const pickerId = useId();
     const isMobile = useMobilePicker();
@@ -98,6 +99,7 @@ export function VideoModelPicker({ config, value, onChange, className, fullWidth
             faceMode={faceMode}
             family={family}
             mobile={isMobile}
+            compact={compact && !isMobile}
             onFaceModeChange={(mode) => {
                 setFaceMode(mode);
                 const available = availableFamilies(items, mode);
@@ -140,7 +142,10 @@ export function VideoModelPicker({ config, value, onChange, className, fullWidth
                     align="start"
                     sideOffset={8}
                     collisionPadding={12}
-                    className="z-[1200] w-[min(720px,calc(100vw-24px))] origin-[var(--radix-popover-content-transform-origin)] rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-2xl outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2"
+                    className={cn(
+                        "z-[1200] origin-[var(--radix-popover-content-transform-origin)] rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-2xl outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
+                        compact ? "w-[min(560px,calc(100vw-24px))]" : "w-[min(720px,calc(100vw-24px))]",
+                    )}
                     onPointerDown={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
                 >
@@ -151,12 +156,13 @@ export function VideoModelPicker({ config, value, onChange, className, fullWidth
     );
 }
 
-function VideoPickerPanel({ items, selectedValue, faceMode, family, mobile, onFaceModeChange, onFamilyChange, onSelect }: {
+function VideoPickerPanel({ items, selectedValue, faceMode, family, mobile, compact, onFaceModeChange, onFamilyChange, onSelect }: {
     items: VideoOption[];
     selectedValue: string;
     faceMode: FaceMode;
     family: FamilyId;
     mobile: boolean;
+    compact: boolean;
     onFaceModeChange: (mode: FaceMode) => void;
     onFamilyChange: (family: FamilyId) => void;
     onSelect: (value: string) => void;
@@ -168,22 +174,18 @@ function VideoPickerPanel({ items, selectedValue, faceMode, family, mobile, onFa
     const groups = groupOptions(visibleItems.filter((item) => item.family === activeFamily), activeFamily);
 
     return (
-        <section className={cn("flex min-h-0 flex-col overflow-hidden", mobile ? "h-full" : "max-h-[min(540px,var(--radix-popover-content-available-height))]")}>
+        <section className={cn("flex min-h-0 flex-col overflow-hidden", mobile ? "h-full" : compact ? "max-h-[min(420px,var(--radix-popover-content-available-height))]" : "max-h-[min(540px,var(--radix-popover-content-available-height))]")}>
             {!mobile ? (
-                <div className="border-b border-border/70 px-5 pb-3 pt-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                        <h2 className="text-base font-semibold">{t("settingsPanels.videoModelPicker.title")}</h2>
-                        <span className="text-xs text-muted-foreground">{t("settingsPanels.videoModelPicker.filterHint")}</span>
-                    </div>
-                    <FaceFilter value={faceMode} onChange={onFaceModeChange} />
+                <div className={cn("border-b border-border/70", compact ? "px-3 py-2" : "px-4 py-3")}>
+                    <FaceFilter value={faceMode} compact={compact} onChange={onFaceModeChange} />
                 </div>
             ) : (
                 <div className="border-b border-border/70 px-4 py-3">
-                    <FaceFilter value={faceMode} onChange={onFaceModeChange} />
+                    <FaceFilter value={faceMode} compact={false} onChange={onFaceModeChange} />
                 </div>
             )}
 
-            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/70 px-3 py-2 sm:px-4">
+            <div className={cn("flex shrink-0 gap-1 overflow-x-auto border-b border-border/70", compact ? "px-2 py-1.5" : "px-3 py-2 sm:px-4")}>
                 {families.map((familyId) => {
                     const name = t(`settingsPanels.videoModelPicker.families.${familyId}.name`);
                     const caption = t(`settingsPanels.videoModelPicker.families.${familyId}.caption`);
@@ -193,27 +195,28 @@ function VideoPickerPanel({ items, selectedValue, faceMode, family, mobile, onFa
                             type="button"
                             onClick={() => onFamilyChange(familyId)}
                             className={cn(
-                                "flex min-w-[112px] flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+                                "flex flex-1 items-center justify-center rounded-md transition-colors",
+                                compact ? "min-w-[96px] gap-1.5 px-2 py-1.5 text-[13px]" : "min-w-[112px] gap-2 px-3 py-2 text-sm",
                                 activeFamily === familyId ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                             )}
                         >
                             <span className="whitespace-nowrap font-medium">{name}</span>
-                            {caption ? <span className="whitespace-nowrap text-xs opacity-65">{caption}</span> : null}
+                            {caption ? <span className={cn("whitespace-nowrap opacity-65", compact ? "text-[11px]" : "text-xs")}>{caption}</span> : null}
                         </button>
                     );
                 })}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-4">
+            <div className={cn("min-h-0 flex-1 overflow-y-auto", compact ? "px-2 py-1.5" : "px-3 py-2 sm:px-4")}>
                 {groups.length ? groups.map((group) => (
-                    <div key={group.label} className="border-b border-border/60 py-2 last:border-0">
-                        <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
-                            <h3 className="text-sm font-semibold">{group.label}</h3>
-                            <span className="text-right text-xs text-muted-foreground">{group.summary}</span>
+                    <div key={group.label} className={cn("border-b border-border/60 last:border-0", compact ? "py-1.5" : "py-2")}>
+                        <div className={cn("flex items-center justify-between gap-3", compact ? "px-1.5 pb-1.5 pt-0.5" : "px-2 pb-2 pt-1")}>
+                            <h3 className={cn("font-semibold", compact ? "text-[13px]" : "text-sm")}>{group.label}</h3>
+                            <span className={cn("text-right text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{group.summary}</span>
                         </div>
-                        <div className={cn("grid gap-2", group.items.length > 1 && "sm:grid-cols-2")}>
+                        <div className={cn("grid", compact ? "gap-1.5" : "gap-2", group.items.length > 1 && "sm:grid-cols-2")}>
                             {group.items.map((item) => (
-                                <ModelOptionCard key={item.value} item={item} selected={item.value === selectedValue} onSelect={onSelect} />
+                                <ModelOptionCard key={item.value} item={item} selected={item.value === selectedValue} compact={compact} onSelect={onSelect} />
                             ))}
                         </div>
                     </div>
@@ -227,22 +230,22 @@ function VideoPickerPanel({ items, selectedValue, faceMode, family, mobile, onFa
     );
 }
 
-function FaceFilter({ value, onChange }: { value: FaceMode; onChange: (mode: FaceMode) => void }) {
+function FaceFilter({ value, compact, onChange }: { value: FaceMode; compact: boolean; onChange: (mode: FaceMode) => void }) {
     const { t } = useTranslation();
     return (
         <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/60 p-1">
-            <FilterButton active={value === "general"} label={t("settingsPanels.videoModelPicker.general")} onClick={() => onChange("general")} />
-            <FilterButton active={value === "human"} label={t("settingsPanels.videoModelPicker.human")} icon={<CircleUserRound className="size-4" />} onClick={() => onChange("human")} />
+            <FilterButton active={value === "general"} label={t("settingsPanels.videoModelPicker.general")} compact={compact} onClick={() => onChange("general")} />
+            <FilterButton active={value === "human"} label={t("settingsPanels.videoModelPicker.human")} compact={compact} icon={<CircleUserRound className="size-4" />} onClick={() => onChange("human")} />
         </div>
     );
 }
 
-function FilterButton({ active, label, icon, onClick }: { active: boolean; label: string; icon?: ReactNode; onClick: () => void }) {
+function FilterButton({ active, label, compact, icon, onClick }: { active: boolean; label: string; compact: boolean; icon?: ReactNode; onClick: () => void }) {
     return (
         <button
             type="button"
             onClick={onClick}
-            className={cn("flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors", active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            className={cn("flex items-center justify-center gap-2 rounded-md font-medium transition-colors", compact ? "h-8 text-[13px]" : "h-9 text-sm", active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
         >
             {icon}
             {label}
@@ -250,7 +253,7 @@ function FilterButton({ active, label, icon, onClick }: { active: boolean; label
     );
 }
 
-function ModelOptionCard({ item, selected, onSelect }: { item: VideoOption; selected: boolean; onSelect: (value: string) => void }) {
+function ModelOptionCard({ item, selected, compact, onSelect }: { item: VideoOption; selected: boolean; compact: boolean; onSelect: (value: string) => void }) {
     const { t } = useTranslation();
     return (
         <button
@@ -259,44 +262,45 @@ function ModelOptionCard({ item, selected, onSelect }: { item: VideoOption; sele
             title={t("settingsPanels.videoModelPicker.chooseProvider", { provider: item.provider })}
             onClick={() => onSelect(item.value)}
             className={cn(
-                "group flex min-h-[82px] w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                "group flex w-full items-start rounded-lg border text-left transition-colors",
+                compact ? "min-h-16 gap-2 px-2.5 py-2" : "min-h-[82px] gap-3 px-3 py-2.5",
                 selected ? "border-foreground bg-accent" : "border-border/80 hover:border-foreground/35 hover:bg-accent/60",
             )}
         >
             <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-sm font-medium">{item.provider}</span>
-                    <FaceBadge support={item.faceSupport} />
-                    <span className="text-xs text-muted-foreground">{item.detail}</span>
+                    <span className={cn("font-medium", compact ? "text-[13px]" : "text-sm")}>{item.provider}</span>
+                    <FaceBadge support={item.faceSupport} compact={compact} />
+                    <span className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.detail}</span>
                 </span>
                 {item.references.length ? (
-                    <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        {item.references.map((reference) => <ReferenceStatView key={`${reference.kind}-${reference.label}`} stat={reference} />)}
+                    <span className={cn("flex flex-wrap gap-y-1 text-muted-foreground", compact ? "mt-1.5 gap-x-2 text-[11px]" : "mt-2 gap-x-3 text-xs")}>
+                        {item.references.map((reference) => <ReferenceStatView key={`${reference.kind}-${reference.label}`} stat={reference} compact={compact} />)}
                     </span>
                 ) : (
-                    <span className="mt-2 block text-xs text-muted-foreground">{item.summary}</span>
+                    <span className={cn("block text-muted-foreground", compact ? "mt-1.5 text-[11px]" : "mt-2 text-xs")}>{item.summary}</span>
                 )}
             </span>
-            <span className={cn("mt-1 flex size-5 shrink-0 items-center justify-center rounded-full border", selected ? "border-foreground bg-foreground text-background" : "border-muted-foreground/55")}>
-                {selected ? <Check className="size-3.5" strokeWidth={3} /> : null}
+            <span className={cn("mt-1 flex shrink-0 items-center justify-center rounded-full border", compact ? "size-[18px]" : "size-5", selected ? "border-foreground bg-foreground text-background" : "border-muted-foreground/55")}>
+                {selected ? <Check className={compact ? "size-3" : "size-3.5"} strokeWidth={3} /> : null}
             </span>
         </button>
     );
 }
 
-function FaceBadge({ support }: { support: FaceSupport }) {
+function FaceBadge({ support, compact }: { support: FaceSupport; compact: boolean }) {
     const { t } = useTranslation();
-    if (support === "unknown") return <span className="text-xs font-medium text-muted-foreground">{t("settingsPanels.videoModelPicker.faceUnknown")}</span>;
+    if (support === "unknown") return <span className={cn("font-medium text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{t("settingsPanels.videoModelPicker.faceUnknown")}</span>;
     return (
-        <span className={cn("text-xs font-medium", support === "supported" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
+        <span className={cn("font-medium", compact ? "text-[11px]" : "text-xs", support === "supported" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>
             {t(support === "supported" ? "settingsPanels.videoModelPicker.faceSupported" : "settingsPanels.videoModelPicker.faceUnsupported")}
         </span>
     );
 }
 
-function ReferenceStatView({ stat }: { stat: ReferenceStat }) {
+function ReferenceStatView({ stat, compact }: { stat: ReferenceStat; compact: boolean }) {
     const Icon = stat.kind === "video" ? Video : stat.kind === "audio" ? Music2 : Image;
-    return <span className="inline-flex items-center gap-1"><Icon className="size-3.5" />{stat.label}</span>;
+    return <span className="inline-flex items-center gap-1"><Icon className={compact ? "size-3" : "size-3.5"} />{stat.label}</span>;
 }
 
 function buildVideoOption(config: AiConfig, value: string, t: TFunction): VideoOption {

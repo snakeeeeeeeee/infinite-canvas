@@ -37,7 +37,6 @@ export default {
         model: { select: "Select model", configure: "Configure provider", assign: "Assign a model for {{capability}} in the provider settings", noMatch: "No matching {{capability}} models", addFirst: "Add a provider and models in Settings first", capabilities: { image: "image generation", video: "video", text: "text", audio: "audio" } },
         videoModelPicker: {
             title: "Select video model",
-            filterHint: "Filter by capability",
             general: "General creation",
             human: "Human subjects",
             faceSupported: "Human faces",
