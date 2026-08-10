@@ -73,9 +73,8 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
                     aria-label={t("canvas.routePicker.current", { route: routeName(t, activeRegion), status: healthText(t, activeHealth) })}
                 >
                     <StatusDot health={activeHealth} />
-                    <span className={cn("truncate", variant === "field" && "text-foreground")}>{variant === "field" ? routeFullName(t, activeRegion) : routeName(t, activeRegion)}</span>
-                    {variant === "field" ? <span className={cn("ml-auto shrink-0 text-xs", healthColor(activeHealth))}>{healthText(t, activeHealth)}</span> : null}
-                    <ChevronDown className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")} />
+                    <span className={cn("truncate", variant === "field" && "text-foreground")}>{routeName(t, activeRegion)}</span>
+                    <ChevronDown className={cn("size-3 shrink-0 transition-transform", variant === "field" && "ml-auto", open && "rotate-180")} />
                 </button>
             </PopoverPrimitive.Trigger>
             <PopoverPrimitive.Portal>
@@ -133,7 +132,14 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
 
 function StatusDot({ health }: { health?: SuperTokenRouteHealth }) {
     if (health?.status === "checking") return <LoaderCircle className="size-3 shrink-0 animate-spin" />;
-    return <span className={cn("size-1.5 shrink-0 rounded-full", !health ? "bg-muted-foreground/45" : health.status === "healthy" ? "bg-emerald-500" : health.status === "slow" ? "bg-amber-500" : "bg-red-500")} />;
+    const color = !health ? "bg-muted-foreground/45" : health.status === "healthy" ? "bg-emerald-500" : health.status === "slow" ? "bg-amber-500" : "bg-red-500";
+    const active = health?.status === "healthy" || health?.status === "slow";
+    return (
+        <span className="relative flex size-2 shrink-0 items-center justify-center">
+            {active ? <span className={cn("absolute inset-0 rounded-full opacity-40 motion-safe:animate-ping motion-safe:[animation-duration:2.8s]", color)} /> : null}
+            <span className={cn("relative size-1.5 rounded-full", color)} />
+        </span>
+    );
 }
 
 function routeName(t: TFunction, region: SuperTokenRegion) {
