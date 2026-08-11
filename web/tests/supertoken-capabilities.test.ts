@@ -79,10 +79,11 @@ describe("SuperToken video request capabilities", () => {
         expect(superTokenReferenceImageFields(capability, "media", ["one", "two"])).toEqual({ image: "one", referenceImages: ["two"] });
     });
 
-    test("enforces H3 media material and audio policy", () => {
+    test("allows optional H3 media references while enforcing output audio", () => {
         const capability = superTokenVideoCapability("leonardo-minimax-h3")!;
         expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "images", images: 0, videos: 0, audios: 0, generateAudio: true })).toBe("当前参考模式缺少必需素材");
-        expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 0, generateAudio: true })).toBe("当前参考模式缺少必需素材");
+        expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 0, generateAudio: true })).toBe("");
+        expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 0, videos: 0, audios: 1, generateAudio: true })).toBe("");
         expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 1, generateAudio: false })).toBe("当前模型的成片音轨固定开启");
         expect(validateSuperTokenVideoSelection({ capability, duration: 5, aspectRatio: "16:9", referenceMode: "media", images: 1, videos: 0, audios: 1, generateAudio: true })).toBe("");
     });

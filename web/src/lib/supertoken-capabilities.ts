@@ -166,7 +166,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         referenceModes: {
             frame: { images: 2, videos: 0, audios: 0, total: 2 },
             images: { images: 5, videos: 0, audios: 0, total: 5, minImages: 1, imageLayout: "primary-first" },
-            media: { images: 5, videos: 0, audios: 3, total: 8, minImages: 1, minAudios: 1, imageLayout: "primary-first" },
+            media: { images: 5, videos: 0, audios: 3, total: 8, imageLayout: "primary-first" },
         },
         defaultReferenceMode: "images",
         audioPolicy: "required",
