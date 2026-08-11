@@ -328,9 +328,11 @@ describe("SuperToken async controls", () => {
         expect(mergeSuperTokenTaskProgress({ progress: 64, progressKnown: true }, { status: "in_progress", progress: 120, progress_known: true })).toEqual({ progress: 99, progressKnown: true });
     });
 
-    test("does not forget a previously known progress value", () => {
+    test("uses numeric progress regardless of progress_known and keeps missing progress indeterminate", () => {
         expect(mergeSuperTokenTaskProgress({ progress: 42, progressKnown: true }, { status: "in_progress", progress_known: false })).toEqual({ progress: 42, progressKnown: true });
-        expect(mergeSuperTokenTaskProgress({ progress: 0, progressKnown: false }, { status: "queued", progress: -10, progress_known: false })).toEqual({ progress: 0, progressKnown: false });
+        expect(mergeSuperTokenTaskProgress({ progress: 0, progressKnown: false }, { status: "queued", progress: 43, progress_known: false })).toEqual({ progress: 43, progressKnown: true });
+        expect(mergeSuperTokenTaskProgress({ progress: 0, progressKnown: false }, { status: "queued", progress: -10, progress_known: false })).toEqual({ progress: 0, progressKnown: true });
+        expect(mergeSuperTokenTaskProgress({ progress: 0, progressKnown: false }, { status: "queued", progress_known: true })).toEqual({ progress: 0, progressKnown: false });
     });
 
     test("marks succeeded tasks as complete only after the remote terminal state", () => {

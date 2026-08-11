@@ -411,9 +411,10 @@ export function mergeSuperTokenTaskProgress(
     if (state.status === "succeeded") return { progress: 100, progressKnown: true };
     const previous = clampProgress(task.progress);
     const incoming = clampProgress(state.progress);
+    const hasIncomingProgress = typeof state.progress === "number" && Number.isFinite(state.progress);
     return {
         progress: Math.min(99, Math.max(previous, incoming)),
-        progressKnown: task.progressKnown || Boolean(state.progress_known),
+        progressKnown: task.progressKnown || hasIncomingProgress,
     };
 }
 
