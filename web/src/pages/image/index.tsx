@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, PenLine, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { App, Button, Checkbox, Drawer, Empty, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
 import { saveAs } from "file-saver";
 import { useTranslation } from "react-i18next";
@@ -8,11 +8,13 @@ import { useTranslation } from "react-i18next";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { GenerationProgress } from "@/components/generation-progress";
 import { ModelPicker } from "@/components/model-picker";
+import { PromptTextArea } from "@/components/prompt-textarea";
 import { canSelectSuperTokenRoute, SuperTokenRoutePicker } from "@/components/supertoken-route-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { limitPromptText } from "@/lib/prompt-limit";
 import { modelOptionLabel, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
@@ -91,6 +93,7 @@ export default function ImagePage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const updatePrompt = useCallback((value: string) => setPrompt(limitPromptText(value)), []);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [results, setResults] = useState<GenerationResult[]>([]);
     const [logs, setLogs] = useState<GenerationLog[]>([]);
@@ -267,7 +270,7 @@ export default function ImagePage() {
         if (!imageCommand || imageCommand.nonce === processedCommandRef.current) return;
         processedCommandRef.current = imageCommand.nonce;
         clearImageCommand();
-        if (typeof imageCommand.prompt === "string") setPrompt(imageCommand.prompt);
+        if (typeof imageCommand.prompt === "string") updatePrompt(imageCommand.prompt);
         if (imageCommand.run && running) {
             if (imageCommand.taskId) updateAgentTask(imageCommand.taskId, { status: "failed", error: t("imageWorkbench.busy") });
             return;
@@ -276,7 +279,7 @@ export default function ImagePage() {
             agentTaskIdRef.current = imageCommand.taskId;
             setAutoRunToken((value) => value + 1);
         }
-    }, [imageCommand, clearImageCommand, running, updateAgentTask]);
+    }, [imageCommand, clearImageCommand, running, updateAgentTask, updatePrompt]);
 
     useEffect(() => {
         if (!autoRunToken) return;
@@ -310,7 +313,7 @@ export default function ImagePage() {
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (payload.kind === "text") {
-            setPrompt(payload.content);
+            updatePrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
@@ -321,7 +324,7 @@ export default function ImagePage() {
     };
 
     const createSession = () => {
-        setPrompt("");
+        updatePrompt("");
         setReferences([]);
         setResults([]);
         setElapsedMs(0);
@@ -416,7 +419,7 @@ export default function ImagePage() {
     const previewGenerationLog = async (log: GenerationLog) => {
         setPreviewLog(log);
         setLogsOpen(false);
-        setPrompt(log.prompt);
+        updatePrompt(log.prompt);
         setReferences(log.references || []);
         if (log.config.imageModel || log.model) updateConfig("imageModel", log.config.imageModel || log.model);
         if (log.config.quality) updateConfig("quality", log.config.quality);
@@ -573,7 +576,7 @@ export default function ImagePage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
+                                <PromptTextArea value={prompt} onChange={updatePrompt} rows={7} placeholder={t("imageWorkbench.promptPlaceholder")} />
                             </div>
 
                             <div className="min-w-0">
@@ -713,7 +716,7 @@ export default function ImagePage() {
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={updatePrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>
                 {t("workbench.deleteLogsConfirm", { count: selectedLogIds.length })}

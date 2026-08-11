@@ -28,6 +28,7 @@ export default {
         durationSeconds: "{{seconds}}s",
         imageReadFailed: "Failed to read image",
     },
+    promptLimit: { reached: "Reached the {{limit}} character limit" },
     settingsPanels: {
         common: { auto: "Auto", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high" },
         image: { title: "Image settings", quality: "Quality", resolution: "Resolution", size: "Size", align16: "Align to multiples of 16", align16Hint: "Round dimensions up to the next multiple of 16 after input", aspectRatio: "Aspect ratio", transparent: "Transparent background", transparentHint: "Generate an image without a background when supported by the model", count: "Image count", images: "{{count}} images", invalidSelection: "The selected image parameters are not supported by this model." },

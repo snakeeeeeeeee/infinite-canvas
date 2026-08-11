@@ -11,9 +11,10 @@ import { runModelPlugin } from "./model-plugin";
 import { createSuperTokenVideoTask, pollSuperTokenVideoTask, type SuperTokenTaskRecord } from "./supertoken";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { apiErrorMessage, formatApiErrorPayload } from "./api-error";
 
-type VideoResponse = { id: string; status?: string; error?: { message?: string }; url?: string; result_url?: string; video_url?: string; content?: { video_url?: string; url?: string } | null };
-type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { message?: string } };
+type VideoResponse = { id: string; status?: string; error?: { code?: string; message?: string }; url?: string; result_url?: string; video_url?: string; content?: { video_url?: string; url?: string } | null };
+type ApiVideoResponse = VideoResponse | { code?: number | string; data?: VideoResponse | null; msg?: string; message?: string; error?: { code?: string; message?: string } };
 type SeedanceTask = {
     id: string;
     status?: "queued" | "running" | "succeeded" | "completed" | "failed" | "cancelled" | "expired";
@@ -165,7 +166,7 @@ async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: st
         if (!created.id) throw new Error(apiText("noVideoTaskId"));
         return { id: created.id, provider: "openai", model };
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("videoTaskCreateFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("videoTaskCreateFailed")));
     }
 }
 
@@ -179,10 +180,10 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask, 
             await assertVideoBlob(content.data);
             return { status: "completed", result: { blob: content.data } };
         }
-        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: readApiErrorMessage(video.error?.message) || apiText("videoGenerationFailed") };
+        if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: formatApiErrorPayload(video.error, apiText("videoGenerationFailed")) };
         return { status: "pending" };
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("videoTaskQueryFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("videoTaskQueryFailed")));
     }
 }
 
@@ -209,7 +210,7 @@ async function createSeedanceTask(config: AiConfig, model: string, prompt: strin
         if (!created.id) throw new Error(apiText("seedanceNoTaskId"));
         return { id: created.id, provider: "seedance", model };
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("seedanceTaskCreateFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("seedanceTaskCreateFailed")));
     }
 }
 
@@ -219,10 +220,10 @@ async function pollSeedanceTask(config: AiConfig, task: VideoGenerationTask, opt
         const url = videoResultUrl(state);
         if (url) return { status: "completed", result: await videoResultFromUrl(url, options) };
         if (state.status === "succeeded" || state.status === "completed") return { status: "failed", error: apiText("seedanceNoVideoUrl") };
-        if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: readApiErrorMessage(state.error?.message) || apiText(state.status === "expired" ? "seedanceVideoTimeout" : "seedanceVideoFailed") };
+        if (state.status === "failed" || state.status === "cancelled" || state.status === "expired") return { status: "failed", error: formatApiErrorPayload(state.error, apiText(state.status === "expired" ? "seedanceVideoTimeout" : "seedanceVideoFailed")) };
         return { status: "pending" };
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("seedanceTaskQueryFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("seedanceTaskQueryFailed")));
     }
 }
 
@@ -342,7 +343,7 @@ function unwrapSeedanceTask(payload: ApiEnvelope<SeedanceTask>) {
 function unwrapEnvelope<T>(payload: ApiEnvelope<T>, emptyMessage: string): T {
     if (!payload) throw new Error(emptyMessage);
     if (typeof payload === "object" && "code" in payload && payload.code !== undefined) {
-        if (payload.code !== 0 && payload.code !== "0") throw new Error(readApiErrorMessage(payload) || apiText("requestFailed"));
+        if (payload.code !== 0 && payload.code !== "0") throw new Error(formatApiErrorPayload(payload, apiText("requestFailed")));
         if (!payload.data) throw new Error(emptyMessage);
         return payload.data;
     }
@@ -353,51 +354,6 @@ function videoResultUrl(payload: VideoResponse | SeedanceTask) {
     return [payload.video_url, payload.result_url, payload.url, payload.content?.video_url, payload.content?.url].find((url) => typeof url === "string" && (isPublicMediaUrl(url) || /\.mp4(\?|#|$)/i.test(url)));
 }
 
-function readApiErrorMessage(value: unknown): string {
-    if (!value) return "";
-    if (typeof value === "string") {
-        try {
-            const parsed = JSON.parse(value);
-            const inner = readApiErrorMessage(parsed) || value;
-            if (inner === value && typeof parsed === "object" && Object.keys(parsed).length === 0) return "";
-            return inner;
-        } catch {
-            if (/<[a-z][\s\S]*>/i.test(value)) return apiText("htmlError", { preview: `${value.slice(0, 80)}...` });
-            return value;
-        }
-    }
-    if (typeof value !== "object") return "";
-    const payload = value as { msg?: unknown; message?: unknown; error?: unknown; detail?: unknown };
-    // error may be a string or an object containing a message.
-    const errorMsg =
-        typeof payload.error === "string"
-            ? payload.error
-            : (payload.error as { message?: unknown })?.message;
-    return (
-        readApiErrorMessage(payload.msg) ||
-        readApiErrorMessage(payload.message) ||
-        readApiErrorMessage(errorMsg) ||
-        readApiErrorMessage(payload.detail) ||
-        ""
-    );
-}
-
-function readAxiosError(error: unknown, fallback: string) {
-    if (axios.isCancel(error)) return apiText("requestCanceled");
-    if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; message?: string; code?: number | string }>(error)) {
-        const responseData = error.response?.data;
-        return readApiErrorMessage(responseData) || statusMessage(error.response?.status, fallback);
-    }
-    if (error instanceof DOMException && error.name === "AbortError") return apiText("requestCanceled");
-    return error instanceof Error ? readApiErrorMessage(error.message) || error.message : fallback;
-}
-
-function statusMessage(status: number | undefined, fallback: string) {
-    if (status === 401 || status === 403) return apiText("authenticationFailed");
-    if (status === 429) return apiText("rateLimited");
-    return status ? `${fallback}（${status}）` : fallback;
-}
-
 async function assertVideoBlob(blob: Blob) {
     if (!blob.type.includes("json")) return;
     let payload: { code?: number; msg?: string; error?: { message?: string } };
@@ -406,8 +362,7 @@ async function assertVideoBlob(blob: Blob) {
     } catch {
         return;
     }
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(readApiErrorMessage(payload) || apiText("videoDownloadFailed"));
-    if (payload.error?.message) throw new Error(readApiErrorMessage(payload.error.message) || payload.error.message);
+    if ((typeof payload.code === "number" && payload.code !== 0) || payload.error) throw new Error(formatApiErrorPayload(payload, apiText("videoDownloadFailed")));
 }
 
 function isPublicMediaUrl(value: string) {

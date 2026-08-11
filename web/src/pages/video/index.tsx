@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, Music2, Plus, SlidersHorizontal, Sparkles, Square, Trash2, Upload, VideoIcon } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent } from "react";
-import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { App, Button, Checkbox, Drawer, Empty, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
@@ -9,11 +9,13 @@ import { useTranslation } from "react-i18next";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { GenerationProgress } from "@/components/generation-progress";
 import { ModelPicker } from "@/components/model-picker";
+import { PromptTextArea } from "@/components/prompt-textarea";
 import { canSelectSuperTokenRoute, SuperTokenRoutePicker } from "@/components/supertoken-route-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
+import { limitPromptText } from "@/lib/prompt-limit";
 import { boolConfig, effectiveReferenceDurationMs, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, superTokenReferenceDurationError, superTokenReferenceDurationPolicy, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_REFERENCE_MAX_DURATION_MS, SEEDANCE_VIDEO_MIME_TYPES, type SuperTokenReferenceDurationPolicy } from "@/lib/seedance-video";
 import { normalizeSuperTokenReferenceMode, remainingSuperTokenReferenceCapacity, superTokenVideoCapability, superTokenVideoResolutions, validateSuperTokenVideoSelection, type SuperTokenReferenceLimits, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
@@ -89,6 +91,7 @@ export default function VideoPage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [prompt, setPrompt] = useState("");
+    const updatePrompt = useCallback((value: string) => setPrompt(limitPromptText(value)), []);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [audioReferences, setAudioReferences] = useState<ReferenceAudio[]>([]);
@@ -259,7 +262,7 @@ export default function VideoPage() {
         if (!videoCommand || videoCommand.nonce === processedCommandRef.current) return;
         processedCommandRef.current = videoCommand.nonce;
         clearVideoCommand();
-        if (typeof videoCommand.prompt === "string") setPrompt(videoCommand.prompt);
+        if (typeof videoCommand.prompt === "string") updatePrompt(videoCommand.prompt);
         if (videoCommand.run && running) {
             if (videoCommand.taskId) updateAgentTask(videoCommand.taskId, { status: "failed", error: t("videoWorkbench.busy") });
             return;
@@ -268,7 +271,7 @@ export default function VideoPage() {
             agentTaskIdRef.current = videoCommand.taskId;
             setAutoRunToken((value) => value + 1);
         }
-    }, [videoCommand, clearVideoCommand, running, updateAgentTask]);
+    }, [videoCommand, clearVideoCommand, running, updateAgentTask, updatePrompt]);
 
     useEffect(() => {
         if (!autoRunToken) return;
@@ -320,7 +323,7 @@ export default function VideoPage() {
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (payload.kind === "text") {
-            setPrompt(payload.content);
+            updatePrompt(payload.content);
         } else if (payload.kind === "image") {
             if (!remainingSuperTokenReferenceCapacity("image", { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, referenceLimits)) {
                 message.warning(t("videoWorkbench.referenceLimitReached"));
@@ -341,7 +344,7 @@ export default function VideoPage() {
     };
 
     const createSession = () => {
-        setPrompt("");
+        updatePrompt("");
         setReferences([]);
         setVideoReferences([]);
         setAudioReferences([]);
@@ -460,7 +463,7 @@ export default function VideoPage() {
     const previewGenerationLog = (log: GenerationLog) => {
         setPreviewLog(log);
         setLogsOpen(false);
-        setPrompt(log.prompt);
+        updatePrompt(log.prompt);
         setReferences(log.references || []);
         setVideoReferences(log.videoReferences || []);
         setAudioReferences(log.audioReferences || []);
@@ -509,7 +512,7 @@ export default function VideoPage() {
                                         </Button>
                                     </div>
                                 </div>
-                                <Input.TextArea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} placeholder={t("videoWorkbench.promptPlaceholder")} />
+                                <PromptTextArea value={prompt} onChange={updatePrompt} rows={7} placeholder={t("videoWorkbench.promptPlaceholder")} />
                             </div>
 
                             <div className="min-w-0">
@@ -681,7 +684,7 @@ export default function VideoPage() {
                     <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={updatePrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title={t("workbench.deleteLogs")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelectedLogs} okText={t("common.delete")} okButtonProps={{ danger: true }} cancelText={t("common.cancel")}>
                 {t("workbench.deleteLogsConfirm", { count: selectedLogIds.length })}

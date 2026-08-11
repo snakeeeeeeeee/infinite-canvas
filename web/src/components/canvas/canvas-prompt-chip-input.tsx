@@ -7,6 +7,7 @@ import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isImeComposing, isPlainEnterKey } from "@/lib/keyboard-event";
+import { limitPromptInput, limitPromptText, PROMPT_CHARACTER_LIMIT, promptCharacterCount } from "@/lib/prompt-limit";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
@@ -37,7 +38,8 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     const composingRef = useRef(false);
     // Track the last value emitted to the parent. An identical focused value is this component's own echo,
     // so skip rebuilding to preserve the caret and IME. Rebuild external changes even while focused.
-    const lastEmittedRef = useRef(value);
+    const limitedValue = limitPromptText(value);
+    const lastEmittedRef = useRef(limitedValue);
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     const referenceByLabel = useMemo(() => new Map(activeReferences.map((item) => [item.label, item])), [activeReferences]);
     // Match longer labels first so a shorter label cannot split a longer one.
     const activeLabels = useMemo(() => Array.from(new Set(activeReferences.map((item) => item.label))).sort((a, b) => b.length - a.length), [activeReferences]);
-    const tokens = useMemo(() => parseTokens(value, activeLabels), [value, activeLabels]);
+    const tokens = useMemo(() => parseTokens(limitedValue, activeLabels), [limitedValue, activeLabels]);
 
     const candidates = useMemo(() => {
         if (!mention) return [];
@@ -59,29 +61,25 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
     useEffect(() => {
         const editor = editorRef.current;
         if (!editor) return;
-        if (document.activeElement === editor && value === lastEmittedRef.current) return;
-        editor.textContent = "";
-        tokens.forEach((token) => {
-            if (token.type === "text") {
-                editor.append(document.createTextNode(token.value));
-                return;
-            }
-            const reference = referenceByLabel.get(token.label);
-            if (reference) editor.append(createReferenceChip(reference, theme, setImagePreview));
-            else editor.append(document.createTextNode(token.label));
-        });
-        lastEmittedRef.current = value;
-    }, [tokens, referenceByLabel, theme, value]);
+        if (document.activeElement === editor && limitedValue === lastEmittedRef.current) return;
+        renderPromptValue(editor, tokens, referenceByLabel, theme, setImagePreview);
+        lastEmittedRef.current = limitedValue;
+    }, [limitedValue, tokens, referenceByLabel, theme]);
 
-    const emit = (next: string) => {
-        lastEmittedRef.current = next;
-        onChange(next);
+    const emit = (next: string, inputType = "") => {
+        const limited = limitPromptInput(next, lastEmittedRef.current, inputType);
+        lastEmittedRef.current = limited;
+        if (limited !== next && editorRef.current) {
+            renderPromptValue(editorRef.current, parseTokens(limited, activeLabels), referenceByLabel, theme, setImagePreview);
+            placeCaretAtEnd(editorRef.current);
+        }
+        onChange(limited);
     };
 
-    const syncFromEditor = () => {
+    const syncFromEditor = (inputType = "") => {
         const editor = editorRef.current;
         if (!editor) return;
-        emit(serializeEditor(editor));
+        emit(serializeEditor(editor), inputType);
         syncMention();
     };
 
@@ -121,10 +119,16 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
             placeCaretAtEnd(editor);
         }
         closeMention();
-        emit(serializeEditor(editor));
+        const next = serializeEditor(editor);
+        if (promptCharacterCount(next) > PROMPT_CHARACTER_LIMIT) {
+            renderPromptValue(editor, parseTokens(lastEmittedRef.current, activeLabels), referenceByLabel, theme, setImagePreview);
+            placeCaretAtEnd(editor);
+            return;
+        }
+        emit(next);
     };
 
-    const showPlaceholder = !value.trim();
+    const showPlaceholder = !limitedValue.trim();
 
     return (
         <div className="relative w-full">
@@ -141,8 +145,8 @@ export function CanvasPromptChipInput({ value, references, onChange, onSubmit, c
                 aria-multiline="true"
                 className={`${className || ""} overflow-y-auto whitespace-pre-wrap break-words outline-none`}
                 style={{ ...style, cursor: "text" }}
-                onInput={() => {
-                    if (!composingRef.current) syncFromEditor();
+                onInput={(event) => {
+                    if (!composingRef.current) syncFromEditor((event.nativeEvent as InputEvent).inputType);
                 }}
                 onCompositionStart={() => {
                     composingRef.current = true;
@@ -298,6 +302,19 @@ function createReferenceChip(reference: CanvasResourceReference, theme: (typeof 
         wrapper.appendChild(text);
     }
     return wrapper;
+}
+
+function renderPromptValue(editor: HTMLElement, tokens: Token[], referenceByLabel: Map<string, CanvasResourceReference>, theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void) {
+    editor.textContent = "";
+    tokens.forEach((token) => {
+        if (token.type === "text") {
+            editor.append(document.createTextNode(token.value));
+            return;
+        }
+        const reference = referenceByLabel.get(token.label);
+        if (reference) editor.append(createReferenceChip(reference, theme, onImagePreview));
+        else editor.append(document.createTextNode(token.label));
+    });
 }
 
 function serializeEditor(editor: HTMLElement) {

@@ -6,7 +6,7 @@ import i18n from "@/i18n";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { normalizeSuperTokenVideoSettings, superTokenVideoCapability, superTokenVideoResolutions, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
+import { normalizeSuperTokenVideoSettings, superTokenVideoCapability, superTokenVideoPixelLabel, superTokenVideoResolutionTierLabel, superTokenVideoResolutions, type SuperTokenReferenceMode } from "@/lib/supertoken-capabilities";
 import { resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
@@ -144,26 +144,38 @@ function SuperTokenVideoSettingsPanel({ config, onConfigChange, theme, showTitle
                     <Segmented
                         block
                         value={resolution}
-                        options={resolutions.map((value) => ({ label: value, value }))}
+                        options={resolutions.map((value) => ({
+                            label: capability.family === "leonardo-minimax-h3" ? (
+                                <span className="flex flex-col py-0.5 leading-tight">
+                                    <span className="text-xs font-medium">{superTokenVideoResolutionTierLabel(value)}</span>
+                                    <span className="text-[10px] opacity-55">{value}</span>
+                                </span>
+                            ) : value,
+                            value,
+                        }))}
                         onChange={(value) => onConfigChange("vquality", String(value).replace(/p$/i, ""))}
                     />
                     {!resolutions.length ? <InlineWarning>{t("settingsPanels.video.noResolution")}</InlineWarning> : null}
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.ratio")} color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {capability.aspectRatios.map((value) => (
-                            <button
-                                key={value}
-                                type="button"
-                                className="flex h-[64px] cursor-pointer flex-col items-center justify-center gap-1 rounded-md border bg-transparent text-sm transition hover:opacity-80"
-                                style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
-                                onMouseDown={(event) => event.stopPropagation()}
-                                onClick={() => onConfigChange("size", value)}
-                            >
-                                <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
-                                <span>{value}</span>
-                            </button>
-                        ))}
+                        {capability.aspectRatios.map((value) => {
+                            const pixelLabel = superTokenVideoPixelLabel(capability.family, resolution, value);
+                            return (
+                                <button
+                                    key={value}
+                                    type="button"
+                                    className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-md border bg-transparent text-sm transition hover:opacity-80 ${pixelLabel ? "h-[72px]" : "h-[64px]"}`}
+                                    style={{ borderColor: ratio === value ? theme.node.text : theme.node.stroke, color: theme.node.text }}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                    onClick={() => onConfigChange("size", value)}
+                                >
+                                    <SizePreview width={ratioPreview(value).width} height={ratioPreview(value).height} color={theme.node.text} />
+                                    <span>{value}</span>
+                                    {pixelLabel ? <span className="text-[10px] leading-none opacity-55">{pixelLabel}</span> : null}
+                                </button>
+                            );
+                        })}
                     </div>
                 </SettingGroup>
                 <SettingGroup title={t("settingsPanels.video.duration")} color={theme.node.muted}>

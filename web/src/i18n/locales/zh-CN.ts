@@ -28,6 +28,7 @@ export default {
         durationSeconds: "{{seconds}}秒",
         imageReadFailed: "读取图片失败",
     },
+    promptLimit: { reached: "已达到 {{limit}} 字符上限" },
     settingsPanels: {
         common: { auto: "自动", low: "低", medium: "中", high: "高", xhigh: "极高" },
         image: { title: "图像设置", quality: "质量", resolution: "分辨率", size: "尺寸", align16: "16 倍数对齐", align16Hint: "输入完成后自动向上补成 16 的倍数", aspectRatio: "宽高比", transparent: "透明背景", transparentHint: "开启后生成无背景的透明图像（仅部分模型可用）", count: "生成张数", images: "{{count}} 张", invalidSelection: "当前图片参数不受所选模型支持，请重新选择。" },

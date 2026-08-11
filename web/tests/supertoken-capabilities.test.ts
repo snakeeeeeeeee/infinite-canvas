@@ -13,6 +13,8 @@ import {
     superTokenUnsupportedModels,
     superTokenVideoCapability,
     superTokenVideoFamilies,
+    superTokenVideoPixelLabel,
+    superTokenVideoResolutionLabel,
     superTokenVideoResolutions,
     validateSuperTokenVideoSelection,
 } from "../src/lib/supertoken-capabilities";
@@ -24,7 +26,9 @@ describe("SuperToken video model catalog", () => {
         expect(classifySuperTokenVideoModel("leonardo-seedance-2.5-720p")).toBe("leonardo-seedance-2.5");
         expect(classifySuperTokenVideoModel("adobe-seedance-3.0-ultra-1440p")).toBe("adobe-seedance-3.0-ultra");
         expect(classifySuperTokenVideoModel("adobe-kling-3.0-omni-1080p")).toBe("adobe-kling-3.0-omni");
+        expect(classifySuperTokenVideoModel("leonardo-minimax-h3-768p")).toBe("leonardo-minimax-h3");
         expect(classifySuperTokenVideoModel("leonardo-minimax-h3-1440p")).toBe("leonardo-minimax-h3");
+        expect(classifySuperTokenVideoModel("leonardo-minimax-h3-2160p")).toBe("leonardo-minimax-h3");
         expect(classifySuperTokenVideoModel("adobe-veo-3.1-1080p")).toBe("");
         expect(classifySuperTokenVideoModel("grok-imagine-video-15s-720p")).toBe("");
         expect(classifySuperTokenVideoModel("grok-imagine-video-1.5-preview-15s-720p")).toBe("");
@@ -44,6 +48,15 @@ describe("SuperToken video model catalog", () => {
         expect(superTokenVideoFamilies(models)).toEqual(["adobe-seedance-2.0-fast", "adobe-kling-3.0"]);
         expect(superTokenVideoResolutions("adobe-seedance-2.0-fast", models)).toEqual(["480p", "720p"]);
         expect(resolveSuperTokenVideoModel("adobe-seedance-2.0-fast", "720p", models)).toBe("adobe-seedance-2.0-fast-720p");
+    });
+
+    test("discovers MiniMax H3 resolution SKUs and resolves the exact model", () => {
+        const models = ["leonardo-minimax-h3-2160p", "leonardo-minimax-h3-768p", "leonardo-minimax-h3-1440p", "leonardo-minimax-h3-1080p"];
+        expect(superTokenVideoFamilies(models)).toEqual(["leonardo-minimax-h3"]);
+        expect(superTokenVideoResolutions("leonardo-minimax-h3", models)).toEqual(["768p", "1440p", "2160p"]);
+        expect(resolveSuperTokenVideoModel("leonardo-minimax-h3", "2160p", models)).toBe("leonardo-minimax-h3-2160p");
+        expect(resolveSuperTokenVideoModel("leonardo-minimax-h3", "1080p", models)).toBe("");
+        expect(superTokenUnsupportedModels([], models)).toEqual(["leonardo-minimax-h3-1080p"]);
     });
 
     test("excludes Veo and xAI from selectable and unavailable model lists", () => {
@@ -133,19 +146,29 @@ describe("SuperToken video request capabilities", () => {
     test("resets every supported model family to valid defaults", () => {
         for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
             const capability = superTokenVideoCapability(family)!;
-            const resolutions = capability.fixedResolution ? [capability.fixedResolution] : ["480p", "720p", "1080p"];
+            const resolutions = capability.fixedResolution ? [capability.fixedResolution] : capability.allowedResolutions || ["480p", "720p", "1080p"];
             const settings = normalizeSuperTokenVideoSettings(capability, resolutions, { resolution: "1080p", aspectRatio: "1:1", duration: 12, referenceMode: "media", generateAudio: false }, true);
             expect(resolutions).toContain(settings.resolution);
-            expect(settings.resolution).toBe(capability.fixedResolution || "480p");
+            expect(settings.resolution).toBe(capability.fixedResolution || capability.allowedResolutions?.[0] || "480p");
             expect(settings.aspectRatio).toBe("16:9");
             expect(settings.referenceMode).toBe(capability.defaultReferenceMode);
             expect(settings.duration).toBe(capability.duration.values?.[0] || capability.duration.min);
             expect(settings.generateAudio).toBe(true);
         }
 
-        const minimax = normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["1440p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false }, true);
-        expect(minimax).toEqual({ resolution: "1440p", aspectRatio: "16:9", duration: 5, referenceMode: "images", generateAudio: true });
-        expect(normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["1440p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false })).toEqual(minimax);
+        const minimax = normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["768p", "1440p", "2160p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false }, true);
+        expect(minimax).toEqual({ resolution: "768p", aspectRatio: "16:9", duration: 5, referenceMode: "images", generateAudio: true });
+        expect(normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["1440p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false })).toEqual({ ...minimax, resolution: "1440p" });
+    });
+
+    test("labels MiniMax H3 resolution tiers and exact ratio pixels", () => {
+        expect(superTokenVideoResolutionLabel("768p")).toBe("HD / 768p");
+        expect(superTokenVideoResolutionLabel("1440p")).toBe("2K / 1440p");
+        expect(superTokenVideoResolutionLabel("2160p")).toBe("4K / 2160p");
+        expect(superTokenVideoPixelLabel("leonardo-minimax-h3", "768p", "16:9")).toBe("1376x768");
+        expect(superTokenVideoPixelLabel("leonardo-minimax-h3", "1440p", "3:4")).toBe("1440x1920");
+        expect(superTokenVideoPixelLabel("leonardo-minimax-h3", "2160p", "21:9")).toBe("5040x2160");
+        expect(superTokenVideoPixelLabel("adobe-seedance-2.0", "2160p", "16:9")).toBe("");
     });
 });
 

@@ -49,6 +49,7 @@ import { buildNodeMentionReferences, type CanvasResourceReference } from "@/lib/
 import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
 import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
+import { limitPromptText } from "@/lib/prompt-limit";
 import {
     audioExtension,
     buildAngleLabel,
@@ -1903,11 +1904,17 @@ function InfiniteCanvasPage() {
     }, []);
 
     const handleNodePromptChange = useCallback((nodeId: string, prompt: string) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)));
+        const nextPrompt = limitPromptText(prompt);
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: nextPrompt } } : node)));
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+        const nextPatch = {
+            ...patch,
+            ...(typeof patch.prompt === "string" ? { prompt: limitPromptText(patch.prompt) } : {}),
+            ...(typeof patch.composerContent === "string" ? { composerContent: limitPromptText(patch.composerContent) } : {}),
+        };
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, nextPatch) : node)));
     }, []);
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {

@@ -10,6 +10,7 @@ import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { superTokenImageBatchPlan } from "@/lib/supertoken-capabilities";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { apiErrorMessage, formatApiErrorPayload } from "./api-error";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -257,7 +258,7 @@ function resolveImageDataUrl(item: Record<string, unknown>) {
 
 function parseImagePayload(payload: ImageApiResponse) {
     if (typeof payload.code === "number" && payload.code !== 0) {
-        throw new Error(payload.msg || apiText("requestFailed"));
+        throw new Error(formatApiErrorPayload(payload, apiText("requestFailed")));
     }
     // Support data, images, and results response fields used by different APIs.
     const imageList = payload.data
@@ -279,64 +280,6 @@ function parseImagePayload(payload: ImageApiResponse) {
     }
 
     return images;
-}
-
-function readApiErrorMessage(value: unknown): string {
-    if (!value) return "";
-    if (typeof value === "string") {
-        // The value may be serialized JSON, such as error.message, or a plain-text error.
-        try {
-            const parsed = JSON.parse(value);
-            const inner = readApiErrorMessage(parsed) || value;
-            // Treat an empty parsed object such as "{}" as having no useful message.
-            if (inner === value && typeof parsed === "object" && Object.keys(parsed).length === 0) return "";
-            return inner;
-        } catch {
-            // Detect HTML error pages.
-            if (/<[a-z][\s\S]*>/i.test(value)) return apiText("htmlError", { preview: `${value.slice(0, 80)}...` });
-            return value;
-        }
-    }
-    if (typeof value !== "object") return "";
-    const payload = value as { msg?: unknown; message?: unknown; error?: unknown; detail?: unknown };
-    // error may be a string or an object containing a message.
-    const errorMsg =
-        typeof payload.error === "string"
-            ? payload.error
-            : (payload.error as { message?: unknown })?.message;
-    return (
-        readApiErrorMessage(payload.msg) ||
-        readApiErrorMessage(payload.message) ||
-        readApiErrorMessage(errorMsg) ||
-        readApiErrorMessage(payload.detail) ||
-        ""
-    );
-}
-
-function readAxiosError(error: unknown, fallback: string) {
-    if (axios.isCancel(error)) return apiText("requestCanceled");
-    if (axios.isAxiosError(error)) {
-        const responseData = error.response?.data;
-        // Prefer the API error from the response body.
-        const apiMsg = readApiErrorMessage(responseData);
-        if (apiMsg) return apiMsg;
-        // Infer the error from the HTTP status when the response body has no usable message.
-        const statusMsg = readStatusError(error.response?.status, fallback);
-        if (statusMsg) return statusMsg;
-        // Fall back to Axios's own error message.
-        return error.message || fallback;
-    }
-    if (error instanceof DOMException && error.name === "AbortError") return apiText("requestCanceled");
-    return error instanceof Error ? readApiErrorMessage(error.message) || error.message : fallback;
-}
-
-function readStatusError(status: number | undefined, fallback: string) {
-    if (status === 401 || status === 403) return apiText("authenticationFailed");
-    if (status === 429) return apiText("rateLimited");
-    if (status === 404) return apiText("notFound");
-    if (status === 502) return apiText("badGateway");
-    if (status === 503) return apiText("serviceBusy");
-    return status ? apiText("httpFailed", { status }) : fallback;
 }
 
 function withSystemPrompt(config: AiConfig, prompt: string) {
@@ -430,11 +373,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function responseErrorMessage(value: unknown) {
-    if (!isRecord(value)) return "";
-    const error = isRecord(value.error) ? value.error : undefined;
-    const response = isRecord(value.response) ? value.response : undefined;
-    const responseError = response && isRecord(response.error) ? response.error : undefined;
-    return stringValue(value.msg) || stringValue(error?.message) || stringValue(responseError?.message);
+    return formatApiErrorPayload(value);
 }
 
 function stringValue(value: unknown) {
@@ -442,23 +381,17 @@ function stringValue(value: unknown) {
 }
 
 function validateResponsePayload(payload: ResponseApiPayload) {
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || apiText("requestFailed"));
-    if (payload.error?.message) throw new Error(payload.error.message);
+    if ((typeof payload.code === "number" && payload.code !== 0) || payload.error) throw new Error(formatApiErrorPayload(payload, apiText("requestFailed")));
 }
 
 function validateGeminiPayload(payload: GeminiPayload) {
-    if (payload.error?.message) throw new Error(payload.error.message);
+    if (payload.error) throw new Error(formatApiErrorPayload(payload, apiText("requestFailed")));
     if (payload.promptFeedback?.blockReason) throw new Error(apiText("geminiRejected", { reason: payload.promptFeedback.blockReason }));
 }
 
 async function readFetchError(response: Response, fallback: string) {
     const text = await response.text();
-    if (!text) return readStatusError(response.status, fallback);
-    try {
-        return responseErrorMessage(JSON.parse(text)) || readStatusError(response.status, fallback);
-    } catch {
-        return text.slice(0, 300) || readStatusError(response.status, fallback);
-    }
+    return formatApiErrorPayload(text, fallback, response.status);
 }
 
 function consumeResponseStreamBlock(block: string, state: ResponseStreamState, onDelta?: (text: string) => void) {
@@ -745,7 +678,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
     if (requestConfig.provider === "supertoken") {
@@ -760,14 +693,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 options,
             );
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
     if (requestConfig.apiFormat === "gemini") {
         try {
             return await requestGeminiImages(requestConfig, prompt, [], n, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
     const quality = normalizeQuality(config.quality);
@@ -794,7 +727,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         const images = parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
     }
 }
 
@@ -820,7 +753,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
     if (requestConfig.provider === "supertoken") {
@@ -835,7 +768,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
                 options,
             );
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
     if (requestConfig.apiFormat === "gemini") {
@@ -843,7 +776,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         try {
             return await requestGeminiImages(requestConfig, requestPrompt, references, n, options);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
 
@@ -874,7 +807,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             );
             return parseImagePayload(response.data);
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
 
@@ -905,7 +838,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const images = parseImagePayload(response.data);
         return images;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
     }
 }
 
@@ -956,7 +889,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
             if (text === apiText("noContent")) onDelta(text);
             return text;
         } catch (error) {
-            throw new Error(readAxiosError(error, apiText("requestFailed")));
+            throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
         }
     }
     try {
@@ -973,7 +906,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         if (answer === apiText("noContent")) onDelta(answer);
         return answer;
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("requestFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
     }
 }
 
@@ -997,7 +930,7 @@ export async function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKe
             .filter((id): id is string => Boolean(id))
             .sort((a, b) => a.localeCompare(b));
     } catch (error) {
-        throw new Error(readAxiosError(error, apiText("modelReadFailed")));
+        throw new Error(await apiErrorMessage(error, apiText("modelReadFailed")));
     }
 }
 

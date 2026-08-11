@@ -6,7 +6,7 @@ import { Popover as PopoverPrimitive } from "radix-ui";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { superTokenVideoCapability, superTokenVideoResolutions, type SuperTokenVideoCapability } from "@/lib/supertoken-capabilities";
+import { superTokenVideoCapability, superTokenVideoResolutionTierLabel, superTokenVideoResolutions, type SuperTokenVideoCapability } from "@/lib/supertoken-capabilities";
 import { decodeChannelModel, modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig } from "@/stores/use-config-store";
 
 type VideoModelPickerProps = {
@@ -311,7 +311,8 @@ function buildVideoOption(config: AiConfig, value: string, t: TFunction): VideoO
     const channel = decoded ? config.channels.find((item) => item.id === decoded.channelId) : undefined;
     const provider = capability?.provider || channel?.name || t("settingsPanels.videoModelPicker.customProvider");
     const resolutions = capability && channel?.supertoken ? superTokenVideoResolutions(capability.family, channel.supertoken.videoModels) : [];
-    const resolution = capability?.fixedResolution || resolutions.join(" / ") || capability?.allowedResolutions?.join(" / ") || "";
+    const resolutionValues = resolutions.length ? resolutions : capability?.allowedResolutions || [];
+    const resolution = capability?.fixedResolution || (capability?.family === "leonardo-minimax-h3" ? resolutionValues.map(superTokenVideoResolutionTierLabel).join(" / ") : resolutionValues.join(" / "));
     const duration = capability ? t("settingsPanels.videoModelPicker.maxSeconds", { count: capability.duration.max }) : "";
 
     return {

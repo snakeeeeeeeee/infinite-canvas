@@ -20,6 +20,7 @@ import { getImageBlob, imageToDataUrl, uploadImage, type UploadedImage } from "@
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { apiErrorMessage, formatApiErrorPayload } from "./api-error";
 
 type SuperTokenRequestConfig = AiConfig & {
     provider: "supertoken";
@@ -252,9 +253,14 @@ export async function createSuperTokenVideoTask(
         submitted = await submit();
     } catch (error) {
         reportRouteFailure(config.baseUrl, config.resourceApiKey, error);
-        if (!referenceUploadCacheKeys.length || !isSuperTokenReferenceMediaUnavailable(error)) throw error;
+        if (!referenceUploadCacheKeys.length || !isSuperTokenReferenceMediaUnavailable(error)) throw new Error(await apiErrorMessage(error, "视频任务创建失败"));
         await invalidateMediaUploadCache(referenceUploadCacheKeys);
-        submitted = await submit(true);
+        try {
+            submitted = await submit(true);
+        } catch (retryError) {
+            reportRouteFailure(config.baseUrl, config.resourceApiKey, retryError);
+            throw new Error(await apiErrorMessage(retryError, "视频任务创建失败"));
+        }
     }
     return persistCreatedTask(
         "video",
@@ -295,7 +301,7 @@ export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, t
         if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
         reportRouteFailure(task.baseUrl, config.resourceApiKey, error);
         if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs || DEFAULT_RETRY_MS };
-        return { status: "failed" as const, error: readApiError(error) };
+        return { status: "failed" as const, error: await apiErrorMessage(error, "视频任务查询失败") };
     }
 }
 
@@ -335,7 +341,7 @@ async function waitForTask<T>(task: SuperTokenTaskRecord, resourceApiKey: string
                 await delay(Math.min(15000, DEFAULT_RETRY_MS * 2 ** Math.min(transientErrors, 3)), options.signal);
                 continue;
             }
-            throw new Error(readApiError(error));
+            throw new Error(await apiErrorMessage(error, "任务查询失败"));
         }
     }
 }
@@ -562,7 +568,7 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
             { headers: { ...authHeaders(config.resourceApiKey), "Content-Type": "application/json" }, signal },
         );
     } catch (error) {
-        throw requestStageError("创建媒体上传会话失败", error, config.baseUrl, config.resourceApiKey);
+        throw await requestStageError("创建媒体上传会话失败", error, config.baseUrl, config.resourceApiKey);
     }
     const sessions = create.data.data || [];
     if (sessions.length !== inputs.length) throw new Error("媒体上传会话数量与文件数量不一致");
@@ -575,7 +581,7 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
     } catch (error) {
         if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
         if (axios.isAxiosError(error) && !error.response) throw new Error("媒体直传失败：浏览器无法访问上传地址，请检查对象存储 CORS 是否允许当前站点的 PUT 请求和 Content-Type");
-        throw requestStageError("媒体直传失败", error);
+        throw await requestStageError("媒体直传失败", error);
     }
     let complete;
     try {
@@ -585,7 +591,7 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
             { headers: { ...authHeaders(config.resourceApiKey), "Content-Type": "application/json" }, signal },
         );
     } catch (error) {
-        throw requestStageError("确认媒体上传失败", error, config.baseUrl, config.resourceApiKey);
+        throw await requestStageError("确认媒体上传失败", error, config.baseUrl, config.resourceApiKey);
     }
     return complete.data.data || [];
 }
@@ -640,9 +646,7 @@ export function isSuperTokenReferenceMediaUnavailable(value: unknown) {
 }
 
 export function formatSuperTokenTaskError(error: { code?: string; message?: string } | null | undefined, fallback: string) {
-    const message = error?.message?.trim() || fallback;
-    const code = error?.code?.trim();
-    return code ? `${message}\ncode: ${code}` : message;
+    return formatApiErrorPayload(error, fallback);
 }
 
 async function referenceImageFile(image: ReferenceImage) {
@@ -805,15 +809,10 @@ function isAbort(error: unknown) {
     return axios.isCancel(error) || (error instanceof DOMException && error.name === "AbortError");
 }
 
-function readApiError(error: unknown) {
-    if (axios.isAxiosError<{ error?: { message?: string }; message?: string }>(error)) return error.response?.data?.error?.message || error.response?.data?.message || error.message;
-    return error instanceof Error ? error.message : "SuperToken 请求失败";
-}
-
-function requestStageError(stage: string, error: unknown, baseUrl?: string, resourceApiKey?: string) {
+async function requestStageError(stage: string, error: unknown, baseUrl?: string, resourceApiKey?: string) {
     if (isAbort(error)) return new DOMException("Aborted", "AbortError");
     if (baseUrl) reportRouteFailure(baseUrl, resourceApiKey || "", error);
-    return new Error(`${stage}：${readApiError(error)}`);
+    return new Error(`${stage}：${await apiErrorMessage(error, "SuperToken 请求失败")}`);
 }
 
 function reportRouteFailure(baseUrl: string, resourceApiKey: string, error: unknown) {

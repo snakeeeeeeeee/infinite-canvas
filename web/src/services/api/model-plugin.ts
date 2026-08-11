@@ -2,6 +2,7 @@ import axios, { type AxiosRequestConfig } from "axios";
 
 import i18n from "@/i18n";
 import { buildApiUrl, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { apiErrorMessage } from "./api-error";
 
 type RequestOptions = { signal?: AbortSignal };
 
@@ -155,7 +156,7 @@ export async function runModelPlugin<T = unknown>(args: RunPluginArgs): Promise<
     } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
         if (axios.isCancel(error)) throw error;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = await apiErrorMessage(error, i18n.t("apiErrors.requestFailed"));
         throw new Error(i18n.t("modelPlugin.executionFailed", { message }));
     }
 }

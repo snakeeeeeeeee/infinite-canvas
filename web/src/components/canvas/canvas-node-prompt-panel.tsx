@@ -4,9 +4,11 @@ import { Button, Modal, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ModelPicker } from "@/components/model-picker";
+import { PromptLimitStatus } from "@/components/prompt-textarea";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasVideoModelPatch, normalizeCanvasVideoConfig } from "@/lib/canvas/canvas-video-config";
+import { limitPromptText, promptReachedLimit } from "@/lib/prompt-limit";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptLibrary } from "./canvas-prompt-library";
@@ -43,19 +45,21 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
     const isEditingExistingContent = hasTextContent || hasImageContent;
-    const [prompt, setPrompt] = useState(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
+    const [prompt, setPrompt] = useState(() => limitPromptText(node.metadata?.composerContent ?? node.metadata?.prompt ?? ""));
     const [expanded, setExpanded] = useState(false);
+    const atPromptLimit = promptReachedLimit(prompt);
 
     // Restore prompts only when switching nodes; preserve the current input after generation on the same node.
     useEffect(() => {
-        setPrompt(node.metadata?.composerContent ?? node.metadata?.prompt ?? "");
+        setPrompt(limitPromptText(node.metadata?.composerContent ?? node.metadata?.prompt ?? ""));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [node.id]);
 
     const updatePrompt = (value: string) => {
-        setPrompt(value);
-        if (isEditingExistingContent) onConfigChange(node.id, { composerContent: value });
-        else onPromptChange(node.id, value);
+        const next = limitPromptText(value);
+        setPrompt(next);
+        if (isEditingExistingContent) onConfigChange(node.id, { composerContent: next });
+        else onPromptChange(node.id, next);
     };
 
     const submit = () => {
@@ -77,15 +81,18 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
-            <CanvasPromptChipInput
-                value={prompt}
-                references={mentionReferences}
-                onChange={updatePrompt}
-                onSubmit={submit}
-                className="thin-scrollbar h-40 w-full cursor-text resize-none rounded-xl px-3 py-2 text-sm leading-5 outline-none"
-                style={{ background: "transparent", color: theme.node.text }}
-                placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
-            />
+            <div className={`overflow-hidden rounded-xl border transition-colors ${atPromptLimit ? "ring-2 ring-red-500/10" : ""}`} style={{ borderColor: atPromptLimit ? "#ef4444" : theme.toolbar.border }}>
+                <CanvasPromptChipInput
+                    value={prompt}
+                    references={mentionReferences}
+                    onChange={updatePrompt}
+                    onSubmit={submit}
+                    className="thin-scrollbar h-32 w-full cursor-text resize-none px-3 py-2 text-sm leading-5 outline-none"
+                    style={{ background: "transparent", color: theme.node.text }}
+                    placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                />
+                <PromptLimitStatus value={prompt} />
+            </div>
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -148,14 +155,17 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             </div>
             <Modal title={t("canvas.promptPanel.editorTitle")} open={expanded} centered width={760} footer={null} onCancel={() => setExpanded(false)} destroyOnHidden>
                 <div data-canvas-no-zoom className="pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-                    <CanvasPromptChipInput
-                        value={prompt}
-                        references={mentionReferences}
-                        onChange={updatePrompt}
-                        className="thin-scrollbar h-[52dvh] min-h-80 w-full cursor-text overflow-y-auto rounded-xl border p-4 text-[15px] leading-6 outline-none"
-                        style={{ background: "transparent", borderColor: theme.toolbar.border, color: theme.node.text }}
-                        placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
-                    />
+                    <div className={`overflow-hidden rounded-xl border transition-colors ${atPromptLimit ? "ring-2 ring-red-500/10" : ""}`} style={{ borderColor: atPromptLimit ? "#ef4444" : theme.toolbar.border }}>
+                        <CanvasPromptChipInput
+                            value={prompt}
+                            references={mentionReferences}
+                            onChange={updatePrompt}
+                            className="thin-scrollbar h-[calc(52dvh-2rem)] min-h-72 w-full cursor-text overflow-y-auto p-4 text-[15px] leading-6 outline-none"
+                            style={{ background: "transparent", color: theme.node.text }}
+                            placeholder={t(`canvas.promptPanel.${mode === "image" && hasImageContent ? "editImage" : mode === "text" && hasTextContent ? "editText" : mode}`)}
+                        />
+                        <PromptLimitStatus value={prompt} />
+                    </div>
                 </div>
             </Modal>
         </div>

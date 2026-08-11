@@ -66,6 +66,12 @@ export const SUPERTOKEN_BASE_URLS: Record<SuperTokenRegion, string> = {
 
 const SIX_VIDEO_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
 const GEMINI_IMAGE_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const MINIMAX_H3_RESOLUTION_TIERS: Record<string, string> = { "768p": "HD", "1440p": "2K", "2160p": "4K" };
+const MINIMAX_H3_PIXELS: Record<string, Record<string, string>> = {
+    "768p": { "1:1": "768x768", "3:4": "768x1024", "4:3": "1024x768", "16:9": "1376x768", "21:9": "1792x768", "9:16": "768x1376" },
+    "1440p": { "1:1": "1440x1440", "3:4": "1440x1920", "4:3": "1920x1440", "16:9": "2560x1440", "21:9": "3360x1440", "9:16": "1440x2560" },
+    "2160p": { "1:1": "2160x2160", "3:4": "2160x2880", "4:3": "2880x2160", "16:9": "3840x2160", "21:9": "5040x2160", "9:16": "2160x3840" },
+};
 
 export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
     {
@@ -164,7 +170,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         },
         defaultReferenceMode: "images",
         audioPolicy: "required",
-        fixedResolution: "1440p",
+        allowedResolutions: ["768p", "1440p", "2160p"],
     },
 ];
 
@@ -256,7 +262,7 @@ export function classifySuperTokenVideoModel(modelId: string) {
     if (seedance) return seedance[1];
     if (/^adobe-kling-3\.0-omni-\d+p$/.test(value)) return "adobe-kling-3.0-omni";
     if (/^adobe-kling-3\.0-\d+p$/.test(value)) return "adobe-kling-3.0";
-    if (/^(?:leonardo-)?minimax-h3-1440p$/.test(value)) return "leonardo-minimax-h3";
+    if (/^(?:leonardo-)?minimax-h3-(?:768|1440|2160)p$/.test(value)) return "leonardo-minimax-h3";
     return "";
 }
 
@@ -291,6 +297,23 @@ export function resolveSuperTokenVideoModel(family: string, resolution: string, 
     if (allowed && !allowed.includes(normalized)) return "";
     const models = modelIds.filter((modelId) => classifySuperTokenVideoModel(modelId) === family);
     return models.find((modelId) => modelId.toLowerCase().endsWith(`-${normalized}`)) || "";
+}
+
+export function superTokenVideoResolutionTierLabel(resolution: string) {
+    const normalized = `${resolution.replace(/p$/i, "")}p`.toLowerCase();
+    return MINIMAX_H3_RESOLUTION_TIERS[normalized] || normalized;
+}
+
+export function superTokenVideoResolutionLabel(resolution: string) {
+    const normalized = `${resolution.replace(/p$/i, "")}p`.toLowerCase();
+    const tier = superTokenVideoResolutionTierLabel(normalized);
+    return tier === normalized ? normalized : `${tier} / ${normalized}`;
+}
+
+export function superTokenVideoPixelLabel(family: string, resolution: string, ratio: string) {
+    if (family !== "leonardo-minimax-h3") return "";
+    const normalized = `${resolution.replace(/p$/i, "")}p`.toLowerCase();
+    return MINIMAX_H3_PIXELS[normalized]?.[ratio] || "";
 }
 
 function dynamicSeedanceCapability(family: string): SuperTokenVideoCapability | undefined {

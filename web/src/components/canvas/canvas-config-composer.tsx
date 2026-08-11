@@ -4,8 +4,10 @@ import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { PromptLimitStatus } from "@/components/prompt-textarea";
 import i18n from "@/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { limitPromptInput, limitPromptText, PROMPT_CHARACTER_LIMIT, promptCharacterCount, promptReachedLimit } from "@/lib/prompt-limit";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 
@@ -34,7 +36,9 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
     const [mention, setMention] = useState<MentionState | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
-    const tokens = useMemo(() => parseComposerTokens(value), [value]);
+    const limitedValue = limitPromptText(value);
+    const atPromptLimit = promptReachedLimit(limitedValue);
+    const tokens = useMemo(() => parseComposerTokens(limitedValue), [limitedValue]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
     const candidates = useMemo(() => {
         if (!mention) return [];
@@ -47,21 +51,18 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
         if (document.activeElement === editorRef.current) return;
         const editor = editorRef.current;
         if (!editor) return;
-        editor.textContent = "";
-        tokens.forEach((token) => {
-            if (token.type === "text") {
-                editor.append(document.createTextNode(token.value));
-                return;
-            }
-            const input = referenceById.get(token.nodeId);
-            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview));
-        });
+        renderComposerValue(editor, tokens, referenceById, inputs, theme, setImagePreview);
     }, [inputs, referenceById, theme, tokens]);
 
-    const syncFromEditor = () => {
+    const syncFromEditor = (inputType = "") => {
         const editor = editorRef.current;
         if (!editor) return;
-        const next = serializeEditor(editor);
+        const serialized = serializeEditor(editor);
+        const next = limitPromptInput(serialized, limitedValue, inputType);
+        if (next !== serialized) {
+            renderComposerValue(editor, parseComposerTokens(next), referenceById, inputs, theme, setImagePreview);
+            placeCaretAtEnd(editor);
+        }
         onChange(next);
         syncMention();
     };
@@ -102,7 +103,13 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
             placeCaretAtEnd(editor);
         }
         closeMention();
-        onChange(serializeEditor(editor));
+        const next = serializeEditor(editor);
+        if (promptCharacterCount(next) > PROMPT_CHARACTER_LIMIT) {
+            renderComposerValue(editor, parseComposerTokens(limitedValue), referenceById, inputs, theme, setImagePreview);
+            placeCaretAtEnd(editor);
+            return;
+        }
+        onChange(next);
     };
 
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => event.stopPropagation();
@@ -123,16 +130,16 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                 </div>
                 <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} />
             </div>
-            <div className="relative rounded-xl">
-                {!value.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>{t("canvas.composer.placeholder")}</div> : null}
+            <div className={`relative rounded-xl border transition-colors ${atPromptLimit ? "ring-2 ring-red-500/10" : ""}`} style={{ borderColor: atPromptLimit ? "#ef4444" : theme.toolbar.border }}>
+                {!limitedValue.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-7" style={{ color: theme.node.placeholder }}>{t("canvas.composer.placeholder")}</div> : null}
                 <div
                     ref={editorRef}
                     contentEditable
                     suppressContentEditableWarning
                     className="thin-scrollbar min-h-28 max-h-72 w-full overflow-y-auto overscroll-contain whitespace-pre-wrap break-words px-3 py-2 text-sm leading-7 outline-none"
                     style={{ color: theme.node.text }}
-                    onInput={() => {
-                        if (!composingRef.current) syncFromEditor();
+                    onInput={(event) => {
+                        if (!composingRef.current) syncFromEditor((event.nativeEvent as InputEvent).inputType);
                     }}
                     onCompositionStart={() => {
                         composingRef.current = true;
@@ -175,6 +182,7 @@ export function CanvasConfigComposer({ value, inputs, onChange, onClose }: Canva
                     onBlur={() => window.setTimeout(closeMention, 120)}
                 />
                 {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
+                <PromptLimitStatus value={limitedValue} className="rounded-b-[11px]" />
             </div>
             {imagePreview ? <Image src={imagePreview} alt={t("canvas.composer.imagePreview")} style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
         </div>
@@ -259,6 +267,18 @@ function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationI
         wrapper.appendChild(text);
     }
     return wrapper;
+}
+
+function renderComposerValue(editor: HTMLElement, tokens: Token[], referenceById: Map<string, NodeGenerationInput>, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void) {
+    editor.textContent = "";
+    tokens.forEach((token) => {
+        if (token.type === "text") {
+            editor.append(document.createTextNode(token.value));
+            return;
+        }
+        const input = referenceById.get(token.nodeId);
+        if (input) editor.append(createReferenceChip(input, inputs, theme, onImagePreview));
+    });
 }
 
 function serializeEditor(editor: HTMLElement) {
