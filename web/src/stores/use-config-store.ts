@@ -425,6 +425,10 @@ export function resolveModelChannel(config: AiConfig, value: string) {
     return matched || config.channels[0] || createModelChannel({ id: "default", name: i18n.t("config.channels.defaultName"), baseUrl: config.baseUrl, apiKey: config.apiKey, apiFormat: config.apiFormat, models: config.models.map(modelOptionName).map((name) => ({ name, capability: guessCapability(name) })) });
 }
 
+export function resolveSuperTokenRouteChannel(config: AiConfig) {
+    return config.channels.find((channel) => channel.provider === "supertoken" && channel.supertoken?.resourceApiKey.trim());
+}
+
 export function resolveModelRequestConfig(config: AiConfig, value: string) {
     const channel = resolveModelChannel(config, value);
     const capability = modelCapabilityOf(config, value);

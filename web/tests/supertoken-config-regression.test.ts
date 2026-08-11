@@ -21,6 +21,7 @@ const {
     defaultConfig,
     encodeChannelModel,
     resolveModelRequestConfig,
+    resolveSuperTokenRouteChannel,
     selectableModelsByCapability,
     superTokenImageConfigPatch,
     superTokenVideoConfigPatch,
@@ -148,6 +149,17 @@ describe("SuperToken channel configuration", () => {
         expect(video).toMatchObject({ provider: "supertoken", apiKey: "video-key", resourceApiKey: "resource-key", baseUrl: "https://api.supertoken.cc" });
         expect(resolveModelRequestConfig({ ...config, supertokenRegion: "cn" }, encodeChannelModel(channel.id, "gpt-image-2"))).toMatchObject({ provider: "supertoken", baseUrl: "https://hk.supertoken.cc" });
         expect(superTokenVideoConfigPatch(config, encodeChannelModel(channel.id, "adobe-kling-3.0"), true)).toEqual({ vquality: "720", size: "16:9", videoSeconds: "3", videoReferenceMode: "frame", videoGenerateAudio: "true" });
+    });
+
+    test("finds the global route credential without depending on the selected model", () => {
+        const custom = createModelChannel({ id: "custom", apiKey: "custom-key", models: [{ name: "custom-image", capability: "image" }] });
+        const supertoken = createSuperTokenChannel({
+            id: "supertoken-route",
+            supertoken: { region: "cn", imageApiKey: "image-key", videoApiKey: "", resourceApiKey: "resource-key", imageModels: ["gpt-image-2"], videoModels: [] },
+        });
+        const config = { ...defaultConfig, channels: [custom, supertoken], model: encodeChannelModel(custom.id, "custom-image") };
+        expect(resolveSuperTokenRouteChannel(config)?.id).toBe(supertoken.id);
+        expect(resolveSuperTokenRouteChannel({ ...config, channels: [custom, createSuperTokenChannel({ ...supertoken, supertoken: { ...supertoken.supertoken!, resourceApiKey: "" } })] })).toBeUndefined();
     });
 
     test("uses the recorded channel id when custom and SuperToken models share a name", () => {

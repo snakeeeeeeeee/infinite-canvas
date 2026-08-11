@@ -342,6 +342,7 @@ function modelFamily(model: string): FamilyId {
 
 function faceSupport(family: FamilyId, capability: SuperTokenVideoCapability | undefined): FaceSupport {
     if (!capability) return "unknown";
+    if (capability.supportsHumanFaces !== undefined) return capability.supportsHumanFaces ? "supported" : "unsupported";
     if (family === "seedance") return capability.provider === "Leonardo" ? "supported" : "unsupported";
     if (family === "kling" || family === "minimax") return "supported";
     return "unknown";

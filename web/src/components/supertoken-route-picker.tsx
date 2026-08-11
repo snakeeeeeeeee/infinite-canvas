@@ -1,6 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { TFunction } from "i18next";
-import { Check, ChevronDown, Globe2, LoaderCircle, RefreshCw, Zap } from "lucide-react";
+import { Check, Globe2, LoaderCircle, RefreshCw, Wifi, WifiOff, Zap } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { useTranslation } from "react-i18next";
 
@@ -13,38 +13,30 @@ import {
     subscribeSuperTokenRouteHealth,
     type SuperTokenRouteHealth,
 } from "@/services/api/supertoken-route-health";
-import { resolveModelChannel, useConfigStore, type AiConfig } from "@/stores/use-config-store";
+import { resolveSuperTokenRouteChannel, useConfigStore } from "@/stores/use-config-store";
 
 type SuperTokenRoutePickerProps = {
-    config: AiConfig;
-    variant?: "compact" | "field";
     className?: string;
+    style?: CSSProperties;
 };
 
 const ROUTES: SuperTokenRegion[] = ["cn", "global"];
 
-export function canSelectSuperTokenRoute(config: AiConfig) {
-    if (!config.model.trim()) return false;
-    const channel = resolveModelChannel(config, config.model);
-    return Boolean(channel.provider === "supertoken" && channel.supertoken?.resourceApiKey.trim() && superTokenBaseUrl("cn") !== superTokenBaseUrl("global"));
-}
-
-export function SuperTokenRoutePicker({ config, variant = "compact", className }: SuperTokenRoutePickerProps) {
+export function SuperTokenRoutePicker({ className, style }: SuperTokenRoutePickerProps) {
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
-    const globalRegion = useConfigStore((state) => state.config.supertokenRegion);
+    const config = useConfigStore((state) => state.config);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const channel = resolveModelChannel(config, config.model);
-    const settings = channel.provider === "supertoken" ? channel.supertoken : undefined;
+    const settings = resolveSuperTokenRouteChannel(config)?.supertoken;
     const resourceApiKey = settings?.resourceApiKey || "";
     const defaultRegion = settings?.region || "cn";
-    const activeRegion = globalRegion || defaultRegion;
+    const activeRegion = config.supertokenRegion || defaultRegion;
     const cnHealth = useSyncExternalStore(subscribeSuperTokenRouteHealth, () => getSuperTokenRouteHealth("cn", resourceApiKey), () => undefined);
     const globalHealth = useSyncExternalStore(subscribeSuperTokenRouteHealth, () => getSuperTokenRouteHealth("global", resourceApiKey), () => undefined);
     const healthByRegion = { cn: cnHealth, global: globalHealth };
     const activeHealth = healthByRegion[activeRegion];
     const routesAreDistinct = superTokenBaseUrl("cn") !== superTokenBaseUrl("global");
-    const routeAvailable = canSelectSuperTokenRoute(config) && Boolean(settings) && routesAreDistinct;
+    const routeAvailable = Boolean(settings && resourceApiKey.trim() && routesAreDistinct);
 
     useEffect(() => {
         if (!routeAvailable) return;
@@ -64,24 +56,19 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
         updateConfig("supertokenRegion", region);
         setOpen(false);
     };
+    const currentLabel = t("canvas.routePicker.current", { route: routeName(t, activeRegion), status: healthText(t, activeHealth) });
 
     return (
         <PopoverPrimitive.Root open={open} onOpenChange={changeOpen}>
             <PopoverPrimitive.Trigger asChild>
                 <button
                     type="button"
-                    className={cn(
-                        variant === "field"
-                            ? "flex h-8 w-full min-w-0 items-center gap-2 rounded-full border border-input bg-transparent px-3 text-sm font-normal shadow-sm transition-colors outline-none hover:bg-black/[0.025] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 dark:hover:bg-white/5"
-                            : "inline-flex h-8 max-w-[72px] min-w-0 shrink-0 items-center gap-1 rounded-md bg-transparent px-1 text-xs text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10",
-                        open && variant === "field" && "border-ring ring-2 ring-ring/20",
-                        className,
-                    )}
-                    aria-label={t("canvas.routePicker.current", { route: routeName(t, activeRegion), status: healthText(t, activeHealth) })}
+                    className={cn("inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:bg-black/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/20 dark:hover:bg-white/10", open && "bg-black/5 text-foreground dark:bg-white/10", className)}
+                    style={style}
+                    aria-label={currentLabel}
+                    title={currentLabel}
                 >
-                    <StatusDot health={activeHealth} />
-                    <span className={cn("truncate", variant === "field" && "text-foreground")}>{routeName(t, activeRegion)}</span>
-                    <ChevronDown className={cn("size-3 shrink-0 transition-transform", variant === "field" && "ml-auto", open && "rotate-180")} />
+                    <RouteStatusIcon health={activeHealth} />
                 </button>
             </PopoverPrimitive.Trigger>
             <PopoverPrimitive.Portal>
@@ -129,7 +116,7 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
                     </div>
                     <div className="mt-1 flex min-h-7 items-center justify-between border-t border-border/60 px-2 pt-1 text-[11px] text-muted-foreground">
                         <span>{ROUTES.some((region) => healthByRegion[region]?.checkedAt) ? t("canvas.routePicker.checkedRecently") : t("canvas.routePicker.autoRefresh")}</span>
-                        {globalRegion ? <button type="button" className="rounded px-1.5 py-1 transition-colors hover:bg-accent hover:text-foreground" onClick={() => changeRegion(undefined)}>{t("canvas.routePicker.followDefault")}</button> : null}
+                        {config.supertokenRegion ? <button type="button" className="rounded px-1.5 py-1 transition-colors hover:bg-accent hover:text-foreground" onClick={() => changeRegion(undefined)}>{t("canvas.routePicker.followDefault")}</button> : null}
                     </div>
                 </PopoverPrimitive.Content>
             </PopoverPrimitive.Portal>
@@ -137,16 +124,10 @@ export function SuperTokenRoutePicker({ config, variant = "compact", className }
     );
 }
 
-function StatusDot({ health }: { health?: SuperTokenRouteHealth }) {
-    if (health?.status === "checking") return <LoaderCircle className="size-3 shrink-0 animate-spin" />;
-    const color = !health ? "bg-muted-foreground/45" : health.status === "healthy" ? "bg-emerald-500" : health.status === "slow" ? "bg-amber-500" : "bg-red-500";
-    const active = health?.status === "healthy" || health?.status === "slow";
-    return (
-        <span className="relative flex size-2 shrink-0 items-center justify-center">
-            {active ? <span className={cn("absolute inset-0 rounded-full opacity-40 motion-safe:animate-ping motion-safe:[animation-duration:2.8s]", color)} /> : null}
-            <span className={cn("relative size-1.5 rounded-full", color)} />
-        </span>
-    );
+function RouteStatusIcon({ health }: { health?: SuperTokenRouteHealth }) {
+    if (health?.status === "checking") return <LoaderCircle className="size-4 shrink-0 animate-spin" />;
+    if (health?.status === "unavailable") return <WifiOff className="size-4 shrink-0 text-red-500" />;
+    return <Wifi className={cn("size-4 shrink-0", health?.status === "healthy" ? "text-emerald-500" : health?.status === "slow" ? "text-amber-500" : undefined)} />;
 }
 
 function routeName(t: TFunction, region: SuperTokenRegion) {

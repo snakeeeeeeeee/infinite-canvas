@@ -9,7 +9,6 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { GenerationProgress } from "@/components/generation-progress";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptTextArea } from "@/components/prompt-textarea";
-import { canSelectSuperTokenRoute, SuperTokenRoutePicker } from "@/components/supertoken-route-picker";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -730,20 +729,13 @@ function GenerationSettings({ config, model, updateConfig, updateConfigPatch, op
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
     const normalizedConfig = { ...config, model, ...(superTokenImageConfigPatch(config, model) || {}) };
-    const isSuperToken = canSelectSuperTokenRoute(normalizedConfig);
 
     return (
         <>
-            <label className={isSuperToken ? "col-span-1 block min-w-0" : "col-span-2 block min-w-0"}>
+            <label className="col-span-2 block min-w-0">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfigPatch({ imageModel: value, ...(superTokenImageConfigPatch(config, value) || {}) })} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
-            {isSuperToken ? (
-                <label className="col-span-1 block min-w-0">
-                    <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.serviceRoute")}</span>
-                    <SuperTokenRoutePicker config={normalizedConfig} variant="field" />
-                </label>
-            ) : null}
             <div className="col-span-2">
                 <ImageSettingsPanel config={normalizedConfig} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>

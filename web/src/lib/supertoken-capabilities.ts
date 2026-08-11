@@ -29,6 +29,7 @@ export type SuperTokenVideoCapability = {
     referenceModes: Partial<Record<SuperTokenReferenceMode, SuperTokenReferenceLimits>>;
     defaultReferenceMode: SuperTokenReferenceMode;
     audioPolicy: SuperTokenAudioPolicy;
+    supportsHumanFaces?: boolean;
     fixedResolution?: string;
     allowedResolutions?: string[];
 };
@@ -186,6 +187,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         },
         defaultReferenceMode: "frame",
         audioPolicy: "unsupported",
+        supportsHumanFaces: true,
         fixedResolution: "720p",
     },
     {
@@ -200,6 +202,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         },
         defaultReferenceMode: "frame",
         audioPolicy: "unsupported",
+        supportsHumanFaces: true,
         fixedResolution: "720p",
     },
 ];

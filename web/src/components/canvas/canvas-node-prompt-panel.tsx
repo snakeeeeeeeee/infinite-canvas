@@ -17,7 +17,6 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasPromptChipInput } from "./canvas-prompt-chip-input";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { CanvasTextSettingsPopover } from "./canvas-text-settings-popover";
-import { SuperTokenRoutePicker } from "@/components/supertoken-route-picker";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
@@ -131,7 +130,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                    {(mode === "image" || mode === "video") ? <SuperTokenRoutePicker config={config} /> : null}
                     <Button
                         type="primary"
                         className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"

@@ -7,7 +7,7 @@ import { requestSuperTokenImages, resumeSuperTokenImageTask, type SuperTokenTask
 import { nanoid } from "nanoid";
 import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { superTokenImageBatchPlan } from "@/lib/supertoken-capabilities";
+import { superTokenImageBatchPlan, superTokenImageCapability } from "@/lib/supertoken-capabilities";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 import { apiErrorMessage, formatApiErrorPayload } from "./api-error";
@@ -682,13 +682,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
         }
     }
     if (requestConfig.provider === "supertoken") {
-        const quality = normalizeQuality(config.quality);
-        const size = requestConfig.model.startsWith("gemini-") ? config.size : resolveRequestSize(quality, config.size);
-        const background = normalizeBackground(config.background);
         try {
             return await requestSuperTokenImageBatches(
                 requestConfig,
-                { prompt: withSystemPrompt(requestConfig, prompt), references: [], size, quality: config.quality, resolution: config.imageResolution, background },
+                buildSuperTokenImageRequest(requestConfig.model, config, { prompt: withSystemPrompt(requestConfig, prompt), references: [] }),
                 n,
                 options,
             );
@@ -757,13 +754,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         }
     }
     if (requestConfig.provider === "supertoken") {
-        const quality = normalizeQuality(config.quality);
-        const size = requestConfig.model.startsWith("gemini-") ? config.size : resolveRequestSize(quality, config.size);
-        const background = normalizeBackground(config.background);
         try {
             return await requestSuperTokenImageBatches(
                 requestConfig,
-                { prompt: withSystemPrompt(requestConfig, requestPrompt), references, mask, size, quality: config.quality, resolution: config.imageResolution, background },
+                buildSuperTokenImageRequest(requestConfig.model, config, { prompt: withSystemPrompt(requestConfig, requestPrompt), references, mask }),
                 n,
                 options,
             );
@@ -840,6 +834,16 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     } catch (error) {
         throw new Error(await apiErrorMessage(error, apiText("requestFailed")));
     }
+}
+
+export function buildSuperTokenImageRequest(
+    model: string,
+    config: Pick<AiConfig, "quality" | "imageResolution" | "size" | "background">,
+    input: { prompt: string; references: ReferenceImage[]; mask?: ReferenceImage },
+) {
+    const capability = superTokenImageCapability(model);
+    const size = capability?.aspectRatios ? config.size : resolveRequestSize(normalizeQuality(config.quality), config.size);
+    return { ...input, size, quality: config.quality, resolution: config.imageResolution, background: normalizeBackground(config.background) };
 }
 
 async function requestSuperTokenImageBatches(

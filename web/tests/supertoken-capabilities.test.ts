@@ -68,6 +68,8 @@ describe("SuperToken video model catalog", () => {
         expect(superTokenVideoResolutions("grok-imagine-video", models)).toEqual(["720p"]);
         expect(resolveSuperTokenVideoModel("grok-imagine-video", "720p", models)).toBe("grok-imagine-video-720p");
         expect(resolveSuperTokenVideoModel("grok-imagine-video-1.5-preview", "720p", models)).toBe("grok-imagine-video-1.5-preview-720p");
+        expect(superTokenVideoCapability("grok-imagine-video")?.supportsHumanFaces).toBe(true);
+        expect(superTokenVideoCapability("grok-imagine-video-1.5-preview")?.supportsHumanFaces).toBe(true);
         expect(superTokenUnsupportedModels([], models)).toEqual([]);
         expect(superTokenVideoFamilies([models[1]])).toEqual(["grok-imagine-video"]);
     });

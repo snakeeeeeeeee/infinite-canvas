@@ -18,6 +18,7 @@ if (!("localStorage" in globalThis)) {
 
 const { superTokenVideoCapability } = await import("../src/lib/supertoken-capabilities");
 const { superTokenReferenceDurationError } = await import("../src/lib/seedance-video");
+const { buildSuperTokenImageRequest } = await import("../src/services/api/image");
 const {
     buildSuperTokenImageOutput,
     buildSuperTokenImageTaskPayload,
@@ -108,6 +109,24 @@ describe("SuperToken request mapping", () => {
         expect(edit.operation).toBe("edit");
         expect(edit.input).toEqual({ prompt: "edit", images: [{ url: "https://example.com/first.png" }, { url: "https://example.com/second.jpg" }] });
         expect(edit.output).toEqual({ count: 1, aspect_ratio: "3:2", resolution: "1k" });
+    });
+
+    test("preserves every Grok aspect ratio through the shared generation and edit mapping", () => {
+        const config = { quality: "auto", imageResolution: "2k", size: "1:1", background: "" };
+        const ratios = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"];
+        ratios.forEach((size) => {
+            expect(buildSuperTokenImageRequest("grok-imagine-image", { ...config, size }, { prompt: "generate", references: [] }).size).toBe(size);
+        });
+
+        const references = [
+            { id: "first", name: "first.png", type: "image/png", url: "https://example.com/first.png", dataUrl: "" },
+            { id: "second", name: "second.jpg", type: "image/jpeg", url: "https://example.com/second.jpg", dataUrl: "" },
+        ];
+        const edit = buildSuperTokenImageRequest("grok-imagine-image-quality", { ...config, size: "9:16" }, { prompt: "edit", references });
+        expect(edit.size).toBe("9:16");
+        expect(edit.references).toEqual(references);
+        expect(buildSuperTokenImageRequest("gemini-3.1-flash-image", { ...config, size: "4:3" }, { prompt: "generate", references: [] }).size).toBe("4:3");
+        expect(buildSuperTokenImageRequest("gpt-image-2", { ...config, size: "9:16" }, { prompt: "generate", references: [] }).size).toBe("1024x1824");
     });
 
     test("maps native multi-image counts only for models that support them", () => {
