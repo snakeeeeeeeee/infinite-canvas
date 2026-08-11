@@ -4,7 +4,7 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
-import { normalizeSuperTokenVideoSettings, superTokenBaseUrl, superTokenModelLabel, superTokenSelectableModels, superTokenVideoCapability, superTokenVideoResolutions, type SuperTokenReferenceMode, type SuperTokenRegion } from "@/lib/supertoken-capabilities";
+import { normalizeSuperTokenVideoSettings, superTokenBaseUrl, superTokenImageCapability, superTokenModelLabel, superTokenSelectableModels, superTokenVideoCapability, superTokenVideoResolutions, type SuperTokenReferenceMode, type SuperTokenRegion } from "@/lib/supertoken-capabilities";
 
 export type ApiCallFormat = "openai" | "gemini" | "ark";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -376,9 +376,11 @@ export function configWithChannels(config: AiConfig, channels: ModelChannel[], p
     };
     const imageModel = pickChannelModel(next, "image", config.imageModel, preferredChannelId);
     const videoModel = pickChannelModel(next, "video", config.videoModel, preferredChannelId);
+    const imageDefaults = imageModel !== config.imageModel ? superTokenImageConfigPatch(next, imageModel) || {} : {};
     const videoDefaults = videoModel !== config.videoModel ? superTokenVideoConfigPatch(next, videoModel, true) || {} : {};
     return {
         ...next,
+        ...imageDefaults,
         ...videoDefaults,
         model: imageModel,
         imageModel,
@@ -455,6 +457,22 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
 }
 
 export type SuperTokenVideoConfigPatch = Pick<AiConfig, "vquality" | "size" | "videoSeconds" | "videoReferenceMode" | "videoGenerateAudio">;
+
+export type SuperTokenImageConfigPatch = Pick<AiConfig, "quality" | "imageResolution" | "size" | "background">;
+
+export function superTokenImageConfigPatch(config: AiConfig, model: string): SuperTokenImageConfigPatch | null {
+    const requestConfig = resolveModelRequestConfig(config, model);
+    if (requestConfig.provider !== "supertoken") return null;
+    const capability = superTokenImageCapability(requestConfig.model);
+    if (!capability) return null;
+    const resolution = capability.resolutions?.find((value) => value.toLowerCase() === config.imageResolution.toLowerCase());
+    return {
+        quality: capability.qualities.includes(config.quality) ? config.quality : capability.qualities[0] || "auto",
+        imageResolution: resolution || capability.resolutions?.[0] || config.imageResolution,
+        size: capability.aspectRatios?.includes(config.size) ? config.size : capability.aspectRatios?.[0] || config.size,
+        background: capability.transparentBackground ? config.background : "",
+    };
+}
 
 export function superTokenVideoConfigPatch(config: AiConfig, model: string, reset = false): SuperTokenVideoConfigPatch | null {
     const requestConfig = resolveModelRequestConfig(config, model);

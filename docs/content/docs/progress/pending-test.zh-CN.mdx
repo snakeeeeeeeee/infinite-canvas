@@ -10,7 +10,9 @@ description: 当前版本已实现但仍需人工验证的变更项
 - SuperToken 渠道编辑：共用的 Resource API Key 应显示红色必填标记；空值时显示字段错误并禁用“保存”，输入非空值后恢复保存。
 - SuperToken 自动授权：未登录用户登录后应安全返回居中的授权确认页；授权成功后自动填入并立即保存图片、视频和资源三个长期 Key，回调 URL 不得出现完整 Key；重复授权应复用 Canvas 管理的已有凭证。取消、弹窗失败、state 不匹配、兑换失败或缺少任一目标分组权限时不得覆盖现有渠道或产生部分凭证，手工高级配置仍可继续使用。
 - SuperToken Docker 运行时地址：默认授权请求与兑换使用 `SUPERTOKEN_AUTH_BASE_URL=https://supertoken.cc`，大陆加速和国际直连媒体请求分别保持 `https://hk.supertoken.cc` 与 `https://api.supertoken.cc`；显式设置 `SUPERTOKEN_BASE_URL` 时才统一覆盖媒体 API 节点，修改变量后无需重新构建 Vite 静态文件。
-- SuperToken 模型能力：确认 Adobe/Leonardo Seedance、Kling/Omni、MiniMax H3 与账号实际 SKU 正确取交集，分辨率选择提交真实模型 ID；Veo 与 xAI 不展示，其余未知模型只显示在“暂不可用”。
+- SuperToken 模型能力：确认 Adobe/Leonardo Seedance、Kling/Omni、MiniMax H3 与账号实际 SKU 正确取交集，分辨率选择提交真实模型 ID；Veo 与旧版 Grok `15s` SKU 不展示，其余未知模型只显示在“暂不可用”。
+- Grok 模型发现与选择器：图片和视频必须分别与对应 Model API Key 的 `/v1/models` 结果取交集；图片选择器仅在账号返回 `grok-imagine-image` 或 `grok-imagine-image-quality` 时显示 Grok/xAI，视频选择器只显示实际返回的两个精确 720p SKU。基础版显示“Grok Imagine Video”，1.5 显示“Grok Imagine Video 1.5 Preview”并带 Preview 标识；1.5 只可描述当前实测更偏重新演绎与风格化，不得承诺更快、更清晰或更稳定。
+- Grok 图片与视频参数：图片应只显示 7 种画幅、`1k/2k`、自动质量和 5/3 张有序参考图上限，不显示自由宽高、蒙版或透明背景；输出请求只能包含 `count/aspect_ratio/resolution`。视频固定 720p 且隐藏分辨率控件，支持 1-15 秒和同 7 种画幅；无图不发参考模式，单图以“单图生视频”映射到 `input.image`，最多两张普通参考图映射到 `input.reference_images`，三图、参考视频、参考音频和生成音轨必须在前端拒绝。刷新恢复、任务历史和日志必须始终保留公开的 `grok-imagine-video-1.5-preview-720p` 快照。
 - SuperToken 生图：在生图工作台和画布分别验证文生图、图生图、批量单槽重试、Gemini 比例/分辨率限制、刷新恢复、停止本地轮询和受保护结果写入本地素材；`gpt-image-2` 与 `adobe-gpt-image-2-count` 生成 2-10 张时应只创建一个带 `output.count` 的任务，并把全部结果恢复到原工作台槽位或画布节点，`gpt-image-2-count` 与 Gemini 仍应拆为独立单图任务，失败结果单独重试不得重跑整批。
 - SuperToken 视频：验证 `frame` 首尾帧、`images` 普通参考图和 `media` 图片/视频/音频分区；上传、拖放、剪贴板和资产选择器应立即采用当前模型与参考模式的数量上限。Leonardo Seedance 2.0/Fast 最多 4 图、3 视频、1 音频且图加视频合计 7 个；Seedance 2.5 `media` 最多 30 图、10 视频、10 音频（合计 50 个），参考音频必须搭配图片或视频，`frame` 仅允许 1-2 张图片。切换模型时，Kling 3.0 默认首尾帧，Kling Omni 与 MiniMax H3 默认多图参考，Seedance 默认混合素材；视频创作台与画布应保持一致，同时重置到账号可用最低分辨率、模型最短时长、默认比例和音轨设置；不兼容素材仍应保留、标红并阻止提交，不得静默删除。
 - SuperToken 视频同名素材：多个同标题画布节点应在任务请求中按顺序映射为 `image-N`、`video-N`、`audio-N`，不得改变素材顺序或上传文件名，也不得再返回 reference name 重复错误。

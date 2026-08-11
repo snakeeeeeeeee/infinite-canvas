@@ -13,7 +13,7 @@ import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { configWithChannels, createModelChannel, createSuperTokenChannel, selectableModelsByCapability, superTokenVideoConfigPatch, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { configWithChannels, createModelChannel, createSuperTokenChannel, selectableModelsByCapability, superTokenImageConfigPatch, superTokenVideoConfigPatch, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -228,7 +228,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                             <ModelPicker
                                                 config={config}
                                                 value={config[group.modelKey]}
-                                                onChange={(model) => updateConfigPatch({ [group.modelKey]: model, ...(group.capability === "video" ? superTokenVideoConfigPatch(config, model, true) || {} : {}) })}
+                                                onChange={(model) => updateConfigPatch({ [group.modelKey]: model, ...(group.capability === "image" ? superTokenImageConfigPatch(config, model) || {} : group.capability === "video" ? superTokenVideoConfigPatch(config, model, true) || {} : {}) })}
                                                 capability={group.capability}
                                                 onMissingConfig={() => setActiveTab("channels")}
                                                 fullWidth

@@ -22,7 +22,7 @@ type VideoModelPickerProps = {
 
 type FaceMode = "general" | "human";
 type FaceSupport = "supported" | "unsupported" | "unknown";
-type FamilyId = "seedance" | "kling" | "minimax" | "other";
+type FamilyId = "seedance" | "kling" | "minimax" | "grok" | "other";
 type ReferenceStat = { kind: "image" | "video" | "audio" | "frame"; label: string };
 
 type VideoOption = {
@@ -34,9 +34,10 @@ type VideoOption = {
     summary: string;
     detail: string;
     references: ReferenceStat[];
+    preview: boolean;
 };
 
-const FAMILY_IDS: FamilyId[] = ["seedance", "kling", "minimax", "other"];
+const FAMILY_IDS: FamilyId[] = ["seedance", "kling", "minimax", "grok", "other"];
 
 export function VideoModelPicker({ config, value, onChange, className, fullWidth = false, compact = false, placeholder, onMissingConfig }: VideoModelPickerProps) {
     const { t } = useTranslation();
@@ -200,6 +201,7 @@ function VideoPickerPanel({ items, selectedValue, faceMode, family, mobile, comp
                                 activeFamily === familyId ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                             )}
                         >
+                            {familyId === "grok" ? <img src="/icons/grok.svg" alt="" className="size-4 shrink-0 dark:invert" /> : null}
                             <span className="whitespace-nowrap font-medium">{name}</span>
                             {caption ? <span className={cn("whitespace-nowrap opacity-65", compact ? "text-[11px]" : "text-xs")}>{caption}</span> : null}
                         </button>
@@ -270,6 +272,7 @@ function ModelOptionCard({ item, selected, compact, onSelect }: { item: VideoOpt
             <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className={cn("font-medium", compact ? "text-[13px]" : "text-sm")}>{item.provider}</span>
+                    {item.preview ? <span className={cn("rounded border border-border px-1 font-medium text-muted-foreground", compact ? "text-[10px]" : "text-[11px]")}>{t("settingsPanels.videoModelPicker.preview")}</span> : null}
                     <FaceBadge support={item.faceSupport} compact={compact} />
                     <span className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.detail}</span>
                 </span>
@@ -324,6 +327,7 @@ function buildVideoOption(config: AiConfig, value: string, t: TFunction): VideoO
         summary: modelSummary(family, model, capability, t),
         detail: [resolution, duration].filter(Boolean).join(" · ") || modelOptionLabel(config, value),
         references: capability ? referenceStats(capability, t) : [],
+        preview: capability?.family === "grok-imagine-video-1.5-preview",
     };
 }
 
@@ -332,6 +336,7 @@ function modelFamily(model: string): FamilyId {
     if (value.includes("seedance")) return "seedance";
     if (value.includes("kling")) return "kling";
     if (value.includes("minimax") || value.includes("hailuo")) return "minimax";
+    if (value.startsWith("grok-imagine-video")) return "grok";
     return "other";
 }
 
@@ -350,6 +355,8 @@ function modelSummary(family: FamilyId, model: string, capability: SuperTokenVid
     if (family === "kling" && value.includes("omni")) return t("settingsPanels.videoModelPicker.summaries.klingOmni");
     if (family === "kling") return t("settingsPanels.videoModelPicker.summaries.kling30");
     if (family === "minimax") return t("settingsPanels.videoModelPicker.summaries.minimaxH3");
+    if (family === "grok" && value.includes("1.5-preview")) return t("settingsPanels.videoModelPicker.summaries.grokPreview");
+    if (family === "grok") return t("settingsPanels.videoModelPicker.summaries.grokBase");
     return capability ? t("settingsPanels.videoModelPicker.maxSeconds", { count: capability.duration.max }) : t("settingsPanels.videoModelPicker.customSummary");
 }
 
@@ -390,6 +397,7 @@ function groupOrder(family: FamilyId, label: string) {
         if (value.includes("2.0")) return 2;
     }
     if (family === "kling") return value.includes("omni") ? 0 : 1;
+    if (family === "grok") return value.includes("1.5") ? 1 : 0;
     return 10;
 }
 

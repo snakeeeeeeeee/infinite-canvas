@@ -140,7 +140,7 @@ function SuperTokenVideoSettingsPanel({ config, onConfigChange, theme, showTitle
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()}>
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.video.title")}</div> : null}
-                <SettingGroup title={t("settingsPanels.video.resolution")} color={theme.node.muted}>
+                {!capability.fixedResolution ? <SettingGroup title={t("settingsPanels.video.resolution")} color={theme.node.muted}>
                     <Segmented
                         block
                         value={resolution}
@@ -156,7 +156,7 @@ function SuperTokenVideoSettingsPanel({ config, onConfigChange, theme, showTitle
                         onChange={(value) => onConfigChange("vquality", String(value).replace(/p$/i, ""))}
                     />
                     {!resolutions.length ? <InlineWarning>{t("settingsPanels.video.noResolution")}</InlineWarning> : null}
-                </SettingGroup>
+                </SettingGroup> : null}
                 <SettingGroup title={t("settingsPanels.video.ratio")} color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">
                         {capability.aspectRatios.map((value) => {
@@ -192,11 +192,11 @@ function SuperTokenVideoSettingsPanel({ config, onConfigChange, theme, showTitle
                     <Segmented
                         block
                         value={referenceMode}
-                        options={modes.map((value) => ({ label: t(`settingsPanels.video.referenceModes.${value}`), value }))}
+                        options={modes.map((value) => ({ label: referenceModeLabel(capability, value), value }))}
                         onChange={(value) => onConfigChange("videoReferenceMode", String(value))}
                     />
                     <div className="text-xs leading-5" style={{ color: theme.node.muted }}>
-                        {referenceModeHint(referenceMode, capability.referenceModes[referenceMode])}
+                        {referenceModeHint(capability, referenceMode, capability.referenceModes[referenceMode])}
                     </div>
                 </SettingGroup>
                 {capability.audioPolicy !== "unsupported" ? (
@@ -357,6 +357,8 @@ function SizePreview({ width, height, color }: { width: number; height: number; 
 
 function ratioPreview(ratio: string) {
     if (ratio === "9:16") return { width: 9, height: 16 };
+    if (ratio === "2:3") return { width: 2, height: 3 };
+    if (ratio === "3:2") return { width: 3, height: 2 };
     if (ratio === "1:1") return { width: 1, height: 1 };
     if (ratio === "4:3") return { width: 4, height: 3 };
     if (ratio === "3:4") return { width: 3, height: 4 };
@@ -393,8 +395,14 @@ function superTokenConfigError(
     return "";
 }
 
-function referenceModeHint(mode: SuperTokenReferenceMode, limits?: { images: number; videos: number; audios: number; total?: number; visualTotal?: number }) {
+function referenceModeLabel(capability: NonNullable<ReturnType<typeof superTokenVideoCapability>>, mode: SuperTokenReferenceMode) {
+    if (capability.provider === "xAI" && mode === "frame") return i18n.t("settingsPanels.video.referenceModes.singleImage");
+    return i18n.t(`settingsPanels.video.referenceModes.${mode}`);
+}
+
+function referenceModeHint(capability: NonNullable<ReturnType<typeof superTokenVideoCapability>>, mode: SuperTokenReferenceMode, limits?: { images: number; videos: number; audios: number; total?: number; visualTotal?: number }) {
     if (!limits) return "";
+    if (capability.provider === "xAI" && mode === "frame") return i18n.t("settingsPanels.video.singleImageHint");
     if (mode === "frame") return i18n.t("settingsPanels.video.frameHint", { count: limits.images });
     if (mode === "images") return i18n.t("settingsPanels.video.imagesHint", { count: limits.images });
     if (limits.visualTotal) return i18n.t("settingsPanels.video.mediaVisualHint", { images: limits.images, videos: limits.videos, visualTotal: limits.visualTotal, audios: limits.audios });

@@ -1,0 +1,139 @@
+{
+  "verified_at": "2026-08-11T20:20:31Z",
+  "base_url": "https://api.supertoken.cc",
+  "credentials": {
+    "image_task_creation": "Image Model API Key",
+    "video_task_creation": "Video Model API Key",
+    "task_polling_and_download": "Resource API Key",
+    "secrets_recorded": false
+  },
+  "model_discovery_evidence": "supertoken-grok-model-discovery.json",
+  "images": [
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-image",
+      "remote_model": "grok-imagine-image",
+      "test_case": "text-to-image",
+      "status": "succeeded",
+      "declared_mime": "image/jpeg",
+      "actual_mime": "image/jpeg",
+      "bytes": 140387,
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-image-quality",
+      "remote_model": "grok-imagine-image-quality",
+      "test_case": "text-to-image",
+      "status": "succeeded",
+      "declared_mime": "image/png",
+      "actual_mime": "image/png",
+      "bytes": 4971842,
+      "width": 2048,
+      "height": 2048
+    },
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-image",
+      "remote_model": "grok-imagine-image",
+      "test_case": "single-image-edit",
+      "status": "succeeded",
+      "declared_mime": "image/jpeg",
+      "actual_mime": "image/jpeg",
+      "bytes": 151013,
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-image",
+      "remote_model": "grok-imagine-image",
+      "test_case": "two-image-edit",
+      "status": "succeeded",
+      "declared_mime": "image/jpeg",
+      "actual_mime": "image/jpeg",
+      "bytes": 147117,
+      "width": 1280,
+      "height": 720
+    }
+  ],
+  "videos": [
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-video-720p",
+      "remote_model": "grok-imagine-video-720p",
+      "test_case": "text-to-video",
+      "status": "succeeded",
+      "declared_mime": "video/mp4",
+      "actual_mime": "video/mp4",
+      "bytes": 243032,
+      "duration_ms": 1000,
+      "playable": true
+    },
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-video-1.5-preview-720p",
+      "remote_model": "grok-imagine-video-1.5-preview-720p",
+      "test_case": "text-to-video",
+      "status": "succeeded",
+      "declared_mime": "video/mp4",
+      "actual_mime": "video/mp4",
+      "bytes": 370266,
+      "duration_ms": 1000,
+      "playable": true
+    },
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-video-720p",
+      "remote_model": "grok-imagine-video-720p",
+      "test_case": "single-image-to-video",
+      "status": "succeeded",
+      "declared_mime": "video/mp4",
+      "actual_mime": "video/mp4",
+      "bytes": 385318,
+      "duration_ms": 1000,
+      "playable": true
+    },
+    {
+      "id": "[redacted]",
+      "public_model": "grok-imagine-video-1.5-preview-720p",
+      "remote_model": "grok-imagine-video-1.5-preview-720p",
+      "test_case": "two-image-reference",
+      "status": "succeeded",
+      "declared_mime": "video/mp4",
+      "actual_mime": "video/mp4",
+      "bytes": 477802,
+      "duration_ms": 1000,
+      "playable": true
+    }
+  ],
+  "request_assertions": {
+    "image_output_only": [
+      "count",
+      "aspect_ratio",
+      "resolution"
+    ],
+    "image_output_excludes": [
+      "size",
+      "quality",
+      "background",
+      "mask",
+      "format"
+    ],
+    "image_resolution_lowercase": true,
+    "single_video_image_field": "input.image",
+    "multi_video_image_field": "input.reference_images",
+    "video_image_fields_mutually_exclusive": true,
+    "video_output_excludes": [
+      "resolution",
+      "generate_audio"
+    ]
+  },
+  "local_verification": {
+    "unit_tests": "70 passed, 356 assertions",
+    "video_playability_method": "macOS AVFoundation avconvert PresetPassthrough",
+    "all_downloaded_videos_playable": true,
+    "preview_snapshot_regression": "passed with a simulated upstream grok-imagine-video-1.5 polling model"
+  }
+}

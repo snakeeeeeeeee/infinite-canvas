@@ -1,4 +1,4 @@
-import { defaultConfig, resolveModelForCapability, superTokenVideoConfigPatch, type AiConfig } from "@/stores/use-config-store";
+import { defaultConfig, resolveModelForCapability, superTokenImageConfigPatch, superTokenVideoConfigPatch, type AiConfig } from "@/stores/use-config-store";
 import i18n from "@/i18n";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
@@ -111,6 +111,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         audioInstructions: node?.metadata?.audioInstructions || config.audioInstructions || defaultConfig.audioInstructions,
         count: String(node?.metadata?.count || (mode === "image" ? config.canvasImageCount || config.count : config.count) || defaultConfig.count),
     };
+    if (mode === "image") return { ...result, ...(superTokenImageConfigPatch(result, result.model) || {}) };
     return mode === "video" ? { ...result, ...(superTokenVideoConfigPatch(result, result.model) || {}) } : result;
 }
 

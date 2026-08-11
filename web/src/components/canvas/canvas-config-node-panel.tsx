@@ -7,6 +7,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, resolveModelForCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasVideoModelPatch, normalizeCanvasVideoConfig } from "@/lib/canvas/canvas-video-config";
+import { canvasImageModelPatch, normalizeCanvasImageConfig } from "@/lib/canvas/canvas-image-config";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas-audio-settings-popover";
@@ -32,7 +33,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = node.metadata?.generationMode || "image";
     const nodeConfig = buildNodeConfig(globalConfig, node, mode);
-    const config = mode === "video" ? normalizeCanvasVideoConfig(nodeConfig) : nodeConfig;
+    const config = mode === "image" ? normalizeCanvasImageConfig(nodeConfig) : mode === "video" ? normalizeCanvasVideoConfig(nodeConfig) : nodeConfig;
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(inputSummary.textCount || inputSummary.imageCount || inputSummary.videoCount || inputSummary.audioCount);
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -106,7 +107,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                     className="canvas-compact-control h-10"
                     config={config}
                     value={config.model}
-                    onChange={(model) => onConfigChange(node.id, mode === "video" ? canvasVideoModelPatch(config, model) : { model })}
+                    onChange={(model) => onConfigChange(node.id, mode === "image" ? canvasImageModelPatch(config, model) : mode === "video" ? canvasVideoModelPatch(config, model) : { model })}
                     capability={mode}
                     compact={mode === "video" || mode === "image"}
                     onMissingConfig={() => openConfigDialog(true)}

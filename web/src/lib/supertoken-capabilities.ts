@@ -3,8 +3,8 @@ import { SUPERTOKEN_BASE_URL } from "@/constant/runtime-config";
 export type SuperTokenRegion = "cn" | "global";
 export type SuperTokenReferenceMode = "frame" | "images" | "media";
 export type SuperTokenAudioPolicy = "optional" | "required" | "unsupported";
-export type SuperTokenImageFamily = "gpt-image" | "gemini";
-export type SuperTokenImageProvider = "azure" | "adobe" | "third-party" | "google";
+export type SuperTokenImageFamily = "gpt-image" | "gemini" | "grok";
+export type SuperTokenImageProvider = "azure" | "adobe" | "third-party" | "google" | "xAI";
 export type SuperTokenImagePositioning = "balanced" | "fast" | "quality";
 
 export type SuperTokenReferenceLimits = {
@@ -23,7 +23,7 @@ export type SuperTokenReferenceLimits = {
 export type SuperTokenVideoCapability = {
     family: string;
     label: string;
-    provider: "Adobe" | "Leonardo";
+    provider: "Adobe" | "Leonardo" | "xAI";
     duration: { min: number; max: number; values?: number[] };
     aspectRatios: string[];
     referenceModes: Partial<Record<SuperTokenReferenceMode, SuperTokenReferenceLimits>>;
@@ -57,6 +57,7 @@ export type SuperTokenImageCapability = {
     aspectRatios?: string[];
     resolutions?: string[];
     mask: boolean;
+    transparentBackground: boolean;
 };
 
 export const SUPERTOKEN_BASE_URLS: Record<SuperTokenRegion, string> = {
@@ -66,6 +67,7 @@ export const SUPERTOKEN_BASE_URLS: Record<SuperTokenRegion, string> = {
 
 const SIX_VIDEO_RATIOS = ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
 const GEMINI_IMAGE_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const GROK_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"];
 const MINIMAX_H3_RESOLUTION_TIERS: Record<string, string> = { "768p": "HD", "1440p": "2K", "2160p": "4K" };
 const MINIMAX_H3_PIXELS: Record<string, Record<string, string>> = {
     "768p": { "1:1": "768x768", "3:4": "768x1024", "4:3": "1024x768", "16:9": "1376x768", "21:9": "1792x768", "9:16": "768x1376" },
@@ -172,12 +174,40 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
         audioPolicy: "required",
         allowedResolutions: ["768p", "1440p", "2160p"],
     },
+    {
+        family: "grok-imagine-video",
+        label: "Grok Imagine Video",
+        provider: "xAI",
+        duration: { min: 1, max: 15 },
+        aspectRatios: GROK_RATIOS,
+        referenceModes: {
+            frame: { images: 1, videos: 0, audios: 0, total: 1 },
+            media: { images: 2, videos: 0, audios: 0, total: 2 },
+        },
+        defaultReferenceMode: "frame",
+        audioPolicy: "unsupported",
+        fixedResolution: "720p",
+    },
+    {
+        family: "grok-imagine-video-1.5-preview",
+        label: "Grok Imagine Video 1.5 Preview",
+        provider: "xAI",
+        duration: { min: 1, max: 15 },
+        aspectRatios: GROK_RATIOS,
+        referenceModes: {
+            frame: { images: 1, videos: 0, audios: 0, total: 1 },
+            media: { images: 2, videos: 0, audios: 0, total: 2 },
+        },
+        defaultReferenceMode: "frame",
+        audioPolicy: "unsupported",
+        fixedResolution: "720p",
+    },
 ];
 
 export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
-    { model: "gpt-image-2", label: "GPT Image 2", family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "third-party", displayResolution: { max: "1.5K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
-    { model: "adobe-gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "adobe", positioning: "balanced", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true },
+    { model: "gpt-image-2", label: "GPT Image 2", family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true, transparentBackground: true },
+    { model: "gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "third-party", displayResolution: { max: "1.5K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true, transparentBackground: true },
+    { model: "adobe-gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "adobe", positioning: "balanced", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true, transparentBackground: true },
     {
         model: "gemini-3.1-flash-image",
         label: "Gemini 3.1 Flash Image",
@@ -194,6 +224,7 @@ export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
         aspectRatios: GEMINI_IMAGE_RATIOS,
         resolutions: ["512", "0.5K", "1K", "2K", "4K"],
         mask: false,
+        transparentBackground: false,
     },
     {
         model: "gemini-3-pro-image-count",
@@ -211,7 +242,10 @@ export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
         aspectRatios: GEMINI_IMAGE_RATIOS,
         resolutions: ["1K", "2K", "4K"],
         mask: false,
+        transparentBackground: false,
     },
+    { model: "grok-imagine-image", label: "Grok Imagine Image", family: "grok", provider: "xAI", displayResolution: { min: "1K", max: "2K" }, operations: ["generation", "edit"], maxImages: 5, maxOutputsPerRequest: 1, qualities: ["auto"], formats: [], aspectRatios: GROK_RATIOS, resolutions: ["1k", "2k"], mask: false, transparentBackground: false },
+    { model: "grok-imagine-image-quality", label: "Grok Imagine Image Quality", family: "grok", provider: "xAI", positioning: "quality", displayResolution: { min: "1K", max: "2K" }, operations: ["generation", "edit"], maxImages: 3, maxOutputsPerRequest: 1, qualities: ["auto"], formats: [], aspectRatios: GROK_RATIOS, resolutions: ["1k", "2k"], mask: false, transparentBackground: false },
 ];
 
 export function superTokenBaseUrl(region: SuperTokenRegion | undefined) {
@@ -258,6 +292,8 @@ export function superTokenModelLabel(model: string) {
 
 export function classifySuperTokenVideoModel(modelId: string) {
     const value = modelId.toLowerCase();
+    if (value === "grok-imagine-video-720p") return "grok-imagine-video";
+    if (value === "grok-imagine-video-1.5-preview-720p") return "grok-imagine-video-1.5-preview";
     const seedance = value.match(/^((?:adobe|leonardo)-seedance-[a-z0-9]+(?:[.-][a-z0-9]+)*)-[1-9]\d*p$/);
     if (seedance) return seedance[1];
     if (/^adobe-kling-3\.0-omni-\d+p$/.test(value)) return "adobe-kling-3.0-omni";
@@ -268,7 +304,7 @@ export function classifySuperTokenVideoModel(modelId: string) {
 
 function isExcludedSuperTokenVideoModel(modelId: string) {
     const value = modelId.toLowerCase();
-    return /^adobe-veo-/.test(value) || /^grok-imagine-video-/.test(value);
+    return /^adobe-veo-/.test(value);
 }
 
 export function superTokenVideoFamilies(modelIds: string[]) {

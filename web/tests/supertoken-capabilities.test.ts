@@ -10,6 +10,7 @@ import {
     superTokenImageCapability,
     superTokenImageBatchPlan,
     superTokenReferenceImageFields,
+    superTokenSelectableModels,
     superTokenUnsupportedModels,
     superTokenVideoCapability,
     superTokenVideoFamilies,
@@ -29,6 +30,8 @@ describe("SuperToken video model catalog", () => {
         expect(classifySuperTokenVideoModel("leonardo-minimax-h3-768p")).toBe("leonardo-minimax-h3");
         expect(classifySuperTokenVideoModel("leonardo-minimax-h3-1440p")).toBe("leonardo-minimax-h3");
         expect(classifySuperTokenVideoModel("leonardo-minimax-h3-2160p")).toBe("leonardo-minimax-h3");
+        expect(classifySuperTokenVideoModel("grok-imagine-video-720p")).toBe("grok-imagine-video");
+        expect(classifySuperTokenVideoModel("grok-imagine-video-1.5-preview-720p")).toBe("grok-imagine-video-1.5-preview");
         expect(classifySuperTokenVideoModel("adobe-veo-3.1-1080p")).toBe("");
         expect(classifySuperTokenVideoModel("grok-imagine-video-15s-720p")).toBe("");
         expect(classifySuperTokenVideoModel("grok-imagine-video-1.5-preview-15s-720p")).toBe("");
@@ -59,10 +62,20 @@ describe("SuperToken video model catalog", () => {
         expect(superTokenUnsupportedModels([], models)).toEqual(["leonardo-minimax-h3-1080p"]);
     });
 
-    test("excludes Veo and xAI from selectable and unavailable model lists", () => {
+    test("selects only exact Grok 720p SKUs from the account model list", () => {
+        const models = ["grok-imagine-video-1.5-preview-720p", "grok-imagine-video-720p"];
+        expect(superTokenVideoFamilies(models)).toEqual(["grok-imagine-video", "grok-imagine-video-1.5-preview"]);
+        expect(superTokenVideoResolutions("grok-imagine-video", models)).toEqual(["720p"]);
+        expect(resolveSuperTokenVideoModel("grok-imagine-video", "720p", models)).toBe("grok-imagine-video-720p");
+        expect(resolveSuperTokenVideoModel("grok-imagine-video-1.5-preview", "720p", models)).toBe("grok-imagine-video-1.5-preview-720p");
+        expect(superTokenUnsupportedModels([], models)).toEqual([]);
+        expect(superTokenVideoFamilies([models[1]])).toEqual(["grok-imagine-video"]);
+    });
+
+    test("keeps Veo hidden while reporting obsolete Grok 15s SKUs as unsupported", () => {
         const models = ["adobe-seedance-2.0-fast-720p", "adobe-veo-3.1-720p", "grok-imagine-video-15s-720p"];
         expect(superTokenVideoFamilies(models)).toEqual(["adobe-seedance-2.0-fast"]);
-        expect(superTokenUnsupportedModels([], models)).toEqual([]);
+        expect(superTokenUnsupportedModels([], models)).toEqual(["grok-imagine-video-15s-720p"]);
     });
 });
 
@@ -77,6 +90,27 @@ describe("SuperToken video request capabilities", () => {
         const capability = superTokenVideoCapability("leonardo-minimax-h3")!;
         expect(superTokenReferenceImageFields(capability, "images", ["one", "two"])).toEqual({ image: "one", referenceImages: ["two"] });
         expect(superTokenReferenceImageFields(capability, "media", ["one", "two"])).toEqual({ image: "one", referenceImages: ["two"] });
+    });
+
+    test("keeps Grok frame and media image fields mutually exclusive", () => {
+        const capability = superTokenVideoCapability("grok-imagine-video-1.5-preview")!;
+        expect(superTokenReferenceImageFields(capability, "frame", ["one"])).toEqual({ image: "one", referenceImages: [] });
+        expect(superTokenReferenceImageFields(capability, "media", ["one", "two"])).toEqual({ image: undefined, referenceImages: ["one", "two"] });
+    });
+
+    test("enforces identical Grok reference and audio limits for both versions", () => {
+        for (const family of ["grok-imagine-video", "grok-imagine-video-1.5-preview"]) {
+            const capability = superTokenVideoCapability(family)!;
+            const validate = (referenceMode: "frame" | "media", images: number, videos = 0, audios = 0, generateAudio = false) => validateSuperTokenVideoSelection({ capability, duration: 1, aspectRatio: "16:9", referenceMode, images, videos, audios, generateAudio });
+            expect(validate("frame", 0)).toBe("");
+            expect(validate("frame", 1)).toBe("");
+            expect(validate("frame", 2)).toBe("参考素材数量超过当前模型限制");
+            expect(validate("media", 2)).toBe("");
+            expect(validate("media", 3)).toBe("参考素材数量超过当前模型限制");
+            expect(validate("media", 0, 1)).toBe("参考素材数量超过当前模型限制");
+            expect(validate("media", 0, 0, 1)).toBe("参考素材数量超过当前模型限制");
+            expect(validate("frame", 0, 0, 0, true)).toBe("当前模型不支持生成音轨");
+        }
     });
 
     test("allows optional H3 media references while enforcing output audio", () => {
@@ -136,7 +170,7 @@ describe("SuperToken video request capabilities", () => {
         expect(normalizeSuperTokenReferenceMode(klingOmni, "media")).toBe("images");
         expect(normalizeSuperTokenReferenceMode(minimax, undefined)).toBe("images");
 
-        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
+        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3", "grok-imagine-video", "grok-imagine-video-1.5-preview"]) {
             const capability = superTokenVideoCapability(family)!;
             for (const mode of ["frame", "images", "media"] as const) {
                 expect(capability.referenceModes[normalizeSuperTokenReferenceMode(capability, mode)]).toBeDefined();
@@ -145,7 +179,7 @@ describe("SuperToken video request capabilities", () => {
     });
 
     test("resets every supported model family to valid defaults", () => {
-        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3"]) {
+        for (const family of ["adobe-seedance-2.0", "adobe-seedance-2.0-fast", "leonardo-seedance-2.0", "leonardo-seedance-2.0-fast", "leonardo-seedance-2.5", "adobe-kling-3.0", "adobe-kling-3.0-omni", "leonardo-minimax-h3", "grok-imagine-video", "grok-imagine-video-1.5-preview"]) {
             const capability = superTokenVideoCapability(family)!;
             const resolutions = capability.fixedResolution ? [capability.fixedResolution] : capability.allowedResolutions || ["480p", "720p", "1080p"];
             const settings = normalizeSuperTokenVideoSettings(capability, resolutions, { resolution: "1080p", aspectRatio: "1:1", duration: 12, referenceMode: "media", generateAudio: false }, true);
@@ -154,7 +188,7 @@ describe("SuperToken video request capabilities", () => {
             expect(settings.aspectRatio).toBe("16:9");
             expect(settings.referenceMode).toBe(capability.defaultReferenceMode);
             expect(settings.duration).toBe(capability.duration.values?.[0] || capability.duration.min);
-            expect(settings.generateAudio).toBe(true);
+            expect(settings.generateAudio).toBe(capability.audioPolicy !== "unsupported");
         }
 
         const minimax = normalizeSuperTokenVideoSettings(superTokenVideoCapability("leonardo-minimax-h3")!, ["768p", "1440p", "2160p"], { resolution: "720p", aspectRatio: "1:1", duration: 6, referenceMode: "media", generateAudio: false }, true);
@@ -180,6 +214,17 @@ describe("SuperToken image catalog", () => {
         expect(superTokenUnsupportedModels(["gpt-image-2", "gemini-3.1-flash-image-preview"], ["unknown-video"])).toEqual(["gemini-3.1-flash-image-preview", "unknown-video"]);
     });
 
+    test("discovers only authorized Grok image models with their exact limits", () => {
+        expect(superTokenImageCapability("grok-imagine-image")).toMatchObject({ family: "grok", provider: "xAI", operations: ["generation", "edit"], maxImages: 5, maxOutputsPerRequest: 1, qualities: ["auto"], resolutions: ["1k", "2k"], mask: false, transparentBackground: false });
+        expect(superTokenImageCapability("grok-imagine-image-quality")).toMatchObject({ family: "grok", provider: "xAI", operations: ["generation", "edit"], maxImages: 3, maxOutputsPerRequest: 1 });
+        expect(superTokenSelectableModels(["grok-imagine-image"], ["grok-imagine-video-720p"])).toEqual([
+            { name: "grok-imagine-image", capability: "image" },
+            { name: "grok-imagine-video", capability: "video" },
+        ]);
+        expect(superTokenSelectableModels([], ["grok-imagine-video-1.5-preview-720p"])).toEqual([{ name: "grok-imagine-video-1.5-preview", capability: "video" }]);
+        expect(superTokenUnsupportedModels(["grok-imagine-image", "grok-imagine-image-quality"], ["grok-imagine-video-720p", "grok-imagine-video-1.5-preview-720p"])).toEqual([]);
+    });
+
     test("uses explicit per-request output limits instead of model-name suffixes", () => {
         expect(superTokenImageCapability("gpt-image-2")).toMatchObject({ family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
         expect(superTokenImageCapability("adobe-gpt-image-2-count")).toMatchObject({ family: "gpt-image", provider: "adobe", positioning: "balanced", displayResolution: { min: "1K", max: "4K" }, maxOutputsPerRequest: 10 });
@@ -191,5 +236,6 @@ describe("SuperToken image catalog", () => {
         expect(canUseSuperTokenNativeImageBatch("gpt-image-2-count", 4)).toBe(false);
         expect(superTokenImageBatchPlan("gpt-image-2", 15)).toEqual([10, 5]);
         expect(superTokenImageBatchPlan("gpt-image-2-count", 3)).toEqual([1, 1, 1]);
+        expect(superTokenImageBatchPlan("grok-imagine-image", 3)).toEqual([1, 1, 1]);
     });
 });

@@ -22,6 +22,7 @@ const {
     encodeChannelModel,
     resolveModelRequestConfig,
     selectableModelsByCapability,
+    superTokenImageConfigPatch,
     superTokenVideoConfigPatch,
 } = await import("../src/stores/use-config-store");
 const { resetInterruptedGeneration } = await import("../src/lib/canvas/canvas-generation-helpers");
@@ -54,6 +55,37 @@ describe("SuperToken channel configuration", () => {
 
         const missingResource = createSuperTokenChannel({ ...imageOnly, supertoken: { ...imageOnly.supertoken!, resourceApiKey: "" } });
         expect(selectableModelsByCapability({ ...defaultConfig, channels: [missingResource] })).toEqual([]);
+    });
+
+    test("intersects Grok options with each credential snapshot and normalizes settings", () => {
+        const channel = createSuperTokenChannel({
+            supertoken: {
+                region: "global",
+                imageApiKey: "image-key",
+                videoApiKey: "video-key",
+                resourceApiKey: "resource-key",
+                imageModels: ["grok-imagine-image"],
+                videoModels: ["grok-imagine-video-1.5-preview-720p"],
+            },
+        });
+        const config = {
+            ...defaultConfig,
+            channels: [channel],
+            quality: "high",
+            imageResolution: "4K",
+            size: "1024x1024",
+            background: "transparent",
+            vquality: "1080",
+            videoSeconds: "20",
+            videoGenerateAudio: "true",
+            videoReferenceMode: "images" as const,
+        };
+        const imageModel = encodeChannelModel(channel.id, "grok-imagine-image");
+        const videoModel = encodeChannelModel(channel.id, "grok-imagine-video-1.5-preview");
+        expect(selectableModelsByCapability(config, "image")).toEqual([imageModel]);
+        expect(selectableModelsByCapability(config, "video")).toEqual([videoModel]);
+        expect(superTokenImageConfigPatch(config, imageModel)).toEqual({ quality: "auto", imageResolution: "1k", size: "1:1", background: "" });
+        expect(superTokenVideoConfigPatch(config, videoModel, true)).toEqual({ vquality: "720", size: "16:9", videoSeconds: "1", videoReferenceMode: "frame", videoGenerateAudio: "false" });
     });
 
     test("prefers Adobe for a new image setup and Flash within a Gemini-only setup", () => {

@@ -15,7 +15,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/a
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { limitPromptText } from "@/lib/prompt-limit";
-import { modelOptionLabel, resolveModelRequestConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { modelOptionLabel, resolveModelRequestConfig, superTokenImageConfigPatch, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -89,6 +89,7 @@ export default function ImagePage() {
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
+    const updateConfigPatch = useConfigStore((state) => state.updateConfigPatch);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -713,7 +714,7 @@ export default function ImagePage() {
             </Drawer>
             <Drawer title={t("workbench.settings")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings config={effectiveConfig} model={model} updateConfig={updateConfig} updateConfigPatch={updateConfigPatch} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={updatePrompt} />
@@ -725,17 +726,17 @@ export default function ImagePage() {
     );
 }
 
-function GenerationSettings({ config, model, updateConfig, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
+function GenerationSettings({ config, model, updateConfig, updateConfigPatch, openConfigDialog }: { config: AiConfig; model: string; updateConfig: UpdateAiConfig; updateConfigPatch: (patch: Partial<AiConfig>) => void; openConfigDialog: (shouldPromptContinue?: boolean) => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
-    const normalizedConfig = { ...config, model };
+    const normalizedConfig = { ...config, model, ...(superTokenImageConfigPatch(config, model) || {}) };
     const isSuperToken = canSelectSuperTokenRoute(normalizedConfig);
 
     return (
         <>
             <label className={isSuperToken ? "col-span-1 block min-w-0" : "col-span-2 block min-w-0"}>
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{t("workbench.model")}</span>
-                <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker config={config} value={model} onChange={(value) => updateConfigPatch({ imageModel: value, ...(superTokenImageConfigPatch(config, value) || {}) })} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             {isSuperToken ? (
                 <label className="col-span-1 block min-w-0">
@@ -1050,7 +1051,7 @@ function superTokenImageSelectionError(config: AiConfig, model: string, referenc
     if (!capability.qualities.includes(config.quality || "auto")) return "当前模型不支持所选图片质量";
     if (capability.resolutions && !capability.resolutions.includes(config.imageResolution)) return "当前模型不支持所选图片分辨率";
     if (capability.aspectRatios && !capability.aspectRatios.includes(config.size)) return "当前模型不支持所选图片比例";
-    if (requestConfig.model.startsWith("gemini-") && config.background === "transparent") return "当前模型不支持透明背景";
+    if (!capability.transparentBackground && config.background === "transparent") return "当前模型不支持透明背景";
     return "";
 }
 

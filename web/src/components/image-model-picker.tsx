@@ -33,7 +33,7 @@ type ImageOption = {
     triggerLabel: string;
 };
 
-const FAMILY_IDS: FamilyId[] = ["gpt-image", "gemini", "other"];
+const FAMILY_IDS: FamilyId[] = ["gpt-image", "gemini", "grok", "other"];
 
 export function ImageModelPicker({ config, value, onChange, className, fullWidth = false, compact = false, placeholder, onMissingConfig }: ImageModelPickerProps) {
     const { t } = useTranslation();
@@ -238,7 +238,7 @@ function buildImageOption(config: AiConfig, value: string, t: TFunction): ImageO
     const outputs = capability.maxOutputsPerRequest > 1
         ? t("settingsPanels.imageModelPicker.maxOutputs", { count: capability.maxOutputsPerRequest })
         : t("settingsPanels.imageModelPicker.singleOutput");
-    const triggerLabel = capability.family === "gpt-image" ? `${capability.label} · ${provider}` : `${alias} · ${capability.label.replace(/ Image$/, "")}`;
+    const triggerLabel = capability.family === "gpt-image" ? `${capability.label} · ${provider}` : alias ? `${alias} · ${capability.label.replace(/ Image$/, "")}` : `${capability.label} · ${provider}`;
 
     return {
         value,
@@ -253,7 +253,7 @@ function buildImageOption(config: AiConfig, value: string, t: TFunction): ImageO
     };
 }
 
-function providerOrder(provider: "azure" | "adobe" | "third-party" | "google") {
+function providerOrder(provider: "azure" | "adobe" | "third-party" | "google" | "xAI") {
     if (provider === "adobe") return 0;
     if (provider === "azure") return 1;
     if (provider === "third-party") return 2;
@@ -263,6 +263,7 @@ function providerOrder(provider: "azure" | "adobe" | "third-party" | "google") {
 function FamilyIcon({ family }: { family: FamilyId }) {
     if (family === "gpt-image") return <img src="/icons/openai.svg" alt="" className="size-4 shrink-0 dark:invert" />;
     if (family === "gemini") return <img src="/icons/gemini.svg" alt="" className="size-4 shrink-0" />;
+    if (family === "grok") return <img src="/icons/grok.svg" alt="" className="size-4 shrink-0 dark:invert" />;
     return <ImageIcon className="size-4 shrink-0 opacity-70" />;
 }
 

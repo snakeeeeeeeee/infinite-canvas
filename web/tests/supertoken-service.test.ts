@@ -20,12 +20,14 @@ const { superTokenVideoCapability } = await import("../src/lib/supertoken-capabi
 const { superTokenReferenceDurationError } = await import("../src/lib/seedance-video");
 const {
     buildSuperTokenImageOutput,
+    buildSuperTokenImageTaskPayload,
     buildSuperTokenMediaUploadFiles,
     buildSuperTokenVideoPayload,
     formatSuperTokenTaskError,
     isSuperTokenMediaUploadReusable,
     isSuperTokenReferenceMediaUnavailable,
     mergeSuperTokenTaskProgress,
+    mergeSuperTokenTaskRemoteState,
     parseSuperTokenRetryAfter,
     superTokenMediaUploadCacheKey,
     superTokenImageSlotIdempotencyKey,
@@ -71,6 +73,41 @@ describe("SuperToken request mapping", () => {
                 resolution: "2K",
             }),
         ).toEqual({ count: 1, format: "png", aspect_ratio: "16:9", resolution: "2K", quality: "auto" });
+    });
+
+    test("maps Grok image generation and ordered edits with an output whitelist", () => {
+        const generation = buildSuperTokenImageTaskPayload("grok-imagine-image", {
+            prompt: "test",
+            references: [],
+            size: "16:9",
+            quality: "high",
+            resolution: "2K",
+            background: "transparent",
+            count: 4,
+        });
+        expect(generation).toEqual({
+            model: "grok-imagine-image",
+            operation: "generation",
+            input: { prompt: "test" },
+            output: { count: 1, aspect_ratio: "16:9", resolution: "2k" },
+        });
+        expect(generation.output).not.toHaveProperty("size");
+        expect(generation.output).not.toHaveProperty("quality");
+        expect(generation.output).not.toHaveProperty("background");
+        expect(generation.output).not.toHaveProperty("format");
+
+        const edit = buildSuperTokenImageTaskPayload("grok-imagine-image-quality", {
+            prompt: "edit",
+            references: [
+                { id: "first", name: "first.png", type: "image/png", url: "https://example.com/first.png", dataUrl: "" },
+                { id: "second", name: "second.jpg", type: "image/jpeg", url: "https://example.com/second.jpg", dataUrl: "" },
+            ],
+            size: "3:2",
+            resolution: "1k",
+        });
+        expect(edit.operation).toBe("edit");
+        expect(edit.input).toEqual({ prompt: "edit", images: [{ url: "https://example.com/first.png" }, { url: "https://example.com/second.jpg" }] });
+        expect(edit.output).toEqual({ count: 1, aspect_ratio: "3:2", resolution: "1k" });
     });
 
     test("maps native multi-image counts only for models that support them", () => {
@@ -156,6 +193,45 @@ describe("SuperToken request mapping", () => {
         });
     });
 
+    test("maps Grok text, single-image, and two-image video requests", () => {
+        const capability = superTokenVideoCapability("grok-imagine-video-1.5-preview")!;
+        const build = (referenceMode: "frame" | "media", images: Array<{ url: string; name: string }>) => buildSuperTokenVideoPayload({
+            model: "grok-imagine-video-1.5-preview-720p",
+            prompt: "test",
+            capability,
+            referenceMode,
+            duration: 1,
+            aspectRatio: "16:9",
+            generateAudio: false,
+            images,
+            videos: [],
+            audios: [],
+        });
+
+        expect(build("frame", [])).toEqual({
+            model: "grok-imagine-video-1.5-preview-720p",
+            operation: "generation",
+            input: { prompt: "test" },
+            output: { duration: 1, aspect_ratio: "16:9" },
+        });
+        expect(build("frame", [{ url: "https://example.com/start.png", name: "start" }]).input).toEqual({
+            prompt: "test",
+            reference_mode: "frame",
+            image: { url: "https://example.com/start.png", name: "image-1" },
+        });
+        expect(build("media", [
+            { url: "https://example.com/one.png", name: "one" },
+            { url: "https://example.com/two.png", name: "two" },
+        ]).input).toEqual({
+            prompt: "test",
+            reference_mode: "media",
+            reference_images: [
+                { url: "https://example.com/one.png", name: "image-1" },
+                { url: "https://example.com/two.png", name: "image-2" },
+            ],
+        });
+    });
+
     test("maps media upload metadata without file contents or keys", () => {
         const files = buildSuperTokenMediaUploadFiles([
             { clientId: "image-1", kind: "image", name: "start.png", type: "", blob: new Blob(["image"], { type: "image/png" }), cacheKey: "private-cache-key" },
@@ -205,6 +281,29 @@ describe("SuperToken request mapping", () => {
 });
 
 describe("SuperToken async controls", () => {
+    test("preserves the submitted public model snapshot when polling reports an upstream model", () => {
+        const task = {
+            id: "task-preview",
+            kind: "video" as const,
+            channelId: "supertoken",
+            baseUrl: "https://api.supertoken.cc",
+            model: "grok-imagine-video-1.5-preview-720p",
+            selectedModel: "supertoken::grok-imagine-video-1.5-preview",
+            idempotencyKey: "idem",
+            clientReferenceId: "client",
+            status: "pending" as const,
+            progress: 20,
+            progressKnown: true,
+            retryAfterMs: 2000,
+            createdAt: 1,
+            updatedAt: 1,
+        };
+        const next = mergeSuperTokenTaskRemoteState(task, { id: task.id, model: "grok-imagine-video-1.5", status: "in_progress", progress: 40, progress_known: true });
+        expect(next.model).toBe("grok-imagine-video-1.5-preview-720p");
+        expect(next.selectedModel).toBe("supertoken::grok-imagine-video-1.5-preview");
+        expect(next.progress).toBe(40);
+    });
+
     test("keeps known task progress monotonic and clamps pending values", () => {
         expect(mergeSuperTokenTaskProgress({ progress: 64, progressKnown: true }, { status: "in_progress", progress: 28, progress_known: true })).toEqual({ progress: 64, progressKnown: true });
         expect(mergeSuperTokenTaskProgress({ progress: 64, progressKnown: true }, { status: "in_progress", progress: 120, progress_known: true })).toEqual({ progress: 99, progressKnown: true });

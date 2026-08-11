@@ -60,6 +60,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
     const transparentBackground = config.background === "transparent";
+    const supportsTransparentBackground = capability?.transparentBackground ?? true;
     const selectedAspect = visibleAspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || visibleAspectOptions[0] || aspectOptions[0]);
     const selectAspect = (value: string) => {
@@ -87,7 +88,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {showTitle ? <div className="text-lg font-semibold">{t("settingsPanels.image.title")}</div> : null}
                 <div className="space-y-2.5">
                     <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.quality")}</SettingTitle>
-                    <div className="grid grid-cols-4 gap-2.5">
+                    <div className={visibleQualityOptions.length === 1 ? "grid grid-cols-1 gap-2.5" : "grid grid-cols-4 gap-2.5"}>
                         {visibleQualityOptions.map((item) => (
                             <OptionPill key={item.value} selected={quality === item.value} theme={theme} onClick={() => onConfigChange("quality", item.value)}>
                                 {t(`settingsPanels.common.${item.labelKey}`)}
@@ -137,7 +138,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         ))}
                     </div>
                 </div>
-                {!requestConfig.model.startsWith("gemini-") || transparentBackground ? <div className="flex items-center justify-between gap-3">
+                {supportsTransparentBackground ? <div className="flex items-center justify-between gap-3">
                     <div className="space-y-0.5">
                         <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.transparent")}</SettingTitle>
                         <div className="text-xs" style={{ color: theme.node.muted, opacity: 0.75 }}>
@@ -148,7 +149,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <Switch size="small" checked={transparentBackground} onChange={(checked) => onConfigChange("background", checked ? "transparent" : "")} />
                     </span>
                 </div> : null}
-                {capability && (!capability.qualities.includes(quality) || (capability.resolutions && !capability.resolutions.includes(config.imageResolution)) || (capability.aspectRatios && !capability.aspectRatios.includes(activeSize)) || (requestConfig.model.startsWith("gemini-") && transparentBackground)) ? (
+                {capability && (!capability.qualities.includes(quality) || (capability.resolutions && !capability.resolutions.includes(config.imageResolution)) || (capability.aspectRatios && !capability.aspectRatios.includes(activeSize)) || (!capability.transparentBackground && transparentBackground)) ? (
                     <div className="rounded-md border border-red-300 bg-red-50 px-2.5 py-2 text-xs leading-5 text-red-600 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">{t("settingsPanels.image.invalidSelection")}</div>
                 ) : null}
                 <div className="space-y-2.5">

@@ -1,0 +1,102 @@
+{
+  "verified_at": "2026-08-12",
+  "endpoint": "https://api.supertoken.cc/v1/models",
+  "image": {
+    "auth": "Image Model API Key",
+    "http_status": 200,
+    "models": [
+      "adobe-gpt-image-2-count",
+      "gemini-3-pro-image",
+      "gemini-3-pro-image-count",
+      "gemini-3.1-flash-image",
+      "gemini-3.1-flash-image-preview",
+      "gpt-image-2",
+      "gpt-image-2-count",
+      "grok-imagine-image",
+      "grok-imagine-image-quality"
+    ],
+    "required_grok_models_present": true
+  },
+  "video": {
+    "auth": "Video Model API Key",
+    "http_status": 200,
+    "models": [
+      "adobe-kling-3.0-1080p",
+      "adobe-kling-3.0-720p",
+      "adobe-kling-3.0-omni-1080p",
+      "adobe-kling-3.0-omni-720p",
+      "adobe-seedance-2.0-1080p",
+      "adobe-seedance-2.0-480p",
+      "adobe-seedance-2.0-720p",
+      "adobe-seedance-2.0-fast-480p",
+      "adobe-seedance-2.0-fast-720p",
+      "grok-imagine-video-1.5-preview-720p",
+      "grok-imagine-video-720p",
+      "leonardo-minimax-h3-1440p",
+      "leonardo-minimax-h3-2160p",
+      "leonardo-minimax-h3-768p",
+      "leonardo-seedance-2.0-1080p",
+      "leonardo-seedance-2.0-480p",
+      "leonardo-seedance-2.0-720p",
+      "leonardo-seedance-2.0-fast-480p",
+      "leonardo-seedance-2.0-fast-720p",
+      "leonardo-seedance-2.5-480p",
+      "leonardo-seedance-2.5-720p"
+    ],
+    "required_grok_models_present": true,
+    "required_grok_supported_endpoint_types": [
+      "video-task",
+      "openai",
+      "openai-response"
+    ],
+    "model_count": 21,
+    "rechecked_after_new_api_fix": {
+      "http_status": 200,
+      "required_grok_models_present": true,
+      "required_endpoint_type_present": true
+    },
+    "rechecked_after_authorization_change": {
+      "http_status": 200,
+      "cache_control": "no-cache",
+      "model_count": 17,
+      "required_grok_models_present": false
+    },
+    "conflicting_observations": {
+      "user_reported_online_response": {
+        "model_count": 19,
+        "required_grok_models_present": true,
+        "target_owned_by": "xai",
+        "target_supported_endpoint_types": [
+          "openai",
+          "openai-response"
+        ]
+      },
+      "independent_recheck_after_user_response": {
+        "api.supertoken.cc": {
+          "resolved_ipv4": "185.150.190.236",
+          "model_count": 17,
+          "required_grok_models_present": false
+        },
+        "hk.supertoken.cc": {
+          "resolved_ipv4": "64.90.9.73",
+          "model_count": 17,
+          "required_grok_models_present": false
+        },
+        "supertoken.cc": {
+          "model_count": 17,
+          "required_grok_models_present": false
+        }
+      }
+    }
+  },
+  "resource_key_checks": [
+    {
+      "endpoint": "https://api.supertoken.cc/v1/image/tasks?limit=1",
+      "http_status": 200
+    },
+    {
+      "endpoint": "https://api.supertoken.cc/v1/video/tasks?limit=1",
+      "http_status": 200
+    }
+  ]
+}

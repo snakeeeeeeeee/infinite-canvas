@@ -35,6 +35,7 @@ type TaskResultImage = { url: string; mime_type?: string; width?: number; height
 type TaskResultVideo = { url: string; mime_type?: string; width?: number; height?: number; duration_ms?: number; filename?: string; url_auth?: "none" | "resource_api_key" };
 type TaskResponse<T> = {
     id: string;
+    model?: string;
     status: "queued" | "in_progress" | "succeeded" | "failed";
     progress?: number;
     progress_known?: boolean;
@@ -120,13 +121,13 @@ export async function requestSuperTokenImages(config: SuperTokenRequestConfig, r
     const capability = superTokenImageCapability(config.model);
     if (!capability) throw new Error("当前模型尚未接入 SuperToken 异步图片协议");
     if (request.mask && !capability.mask) throw new Error("当前模型不支持蒙版编辑");
-    if (config.model.startsWith("gemini-") && request.background === "transparent") throw new Error("当前模型不支持透明背景");
+    if (!capability.transparentBackground && request.background === "transparent") throw new Error("当前模型不支持透明背景");
     if (request.references.length > capability.maxImages) throw new Error(`当前模型最多支持 ${capability.maxImages} 张参考图`);
     const count = Math.max(1, Math.floor(request.count || 1));
     if (count > capability.maxOutputsPerRequest) throw new Error(`当前模型单次最多生成 ${capability.maxOutputsPerRequest} 张图片`);
     if (request.quality && !capability.qualities.includes(request.quality)) throw new Error("当前模型不支持所选图片质量");
     if (capability.aspectRatios && request.size && !capability.aspectRatios.includes(request.size)) throw new Error("当前模型不支持所选图片比例");
-    if (capability.resolutions && request.resolution && !capability.resolutions.includes(request.resolution)) throw new Error("当前模型不支持所选图片分辨率");
+    if (capability.resolutions && request.resolution && !capability.resolutions.some((value) => value.toLowerCase() === request.resolution!.toLowerCase())) throw new Error("当前模型不支持所选图片分辨率");
     const operation = request.references.length ? "edit" : "generation";
     if (!capability.operations.includes(operation)) throw new Error("当前模型不支持此图片操作");
 
@@ -160,14 +161,9 @@ export async function requestSuperTokenImages(config: SuperTokenRequestConfig, r
                 signal: options.signal,
             });
         } else {
-            const input = {
-                prompt: request.prompt,
-                ...(request.references.length ? { images: request.references.map((item) => ({ url: item.url })) } : {}),
-                ...(request.mask?.url ? { mask: { url: request.mask.url } } : {}),
-            };
             response = await axios.post<TaskResponse<{ images: TaskResultImage[] }>>(
                 apiUrl(config.baseUrl, "/image/tasks"),
-                { model: config.model, operation, input, output, client_reference_id: clientReferenceId },
+                { ...buildSuperTokenImageTaskPayload(config.model, request), client_reference_id: clientReferenceId },
                 { headers: { ...authHeaders(config.apiKey), "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, signal: options.signal },
             );
         }
@@ -392,12 +388,12 @@ async function persistCreatedTask<T>(
 }
 
 async function updateStoredTaskFromRemote<T>(task: SuperTokenTaskRecord, state: TaskResponse<T>, retryAfter?: unknown) {
-    const next = toStoredTask(task, state, retryAfter);
+    const next = mergeSuperTokenTaskRemoteState(task, state, retryAfter);
     await taskStore.setItem(task.id, next);
     Object.assign(task, next);
 }
 
-function toStoredTask<T>(task: SuperTokenTaskRecord, state: TaskResponse<T>, retryAfter?: unknown): SuperTokenTaskRecord {
+export function mergeSuperTokenTaskRemoteState<T>(task: SuperTokenTaskRecord, state: TaskResponse<T>, retryAfter?: unknown): SuperTokenTaskRecord {
     return {
         ...task,
         status: state.status === "failed" ? "failed" : task.status === "succeeded" ? "succeeded" : "pending",
@@ -696,6 +692,13 @@ async function downloadVideoResult(video: TaskResultVideo, resourceApiKey: strin
 export function buildSuperTokenImageOutput(model: string, request: ImageRequest) {
     const capability = superTokenImageCapability(model);
     const count = Math.min(capability?.maxOutputsPerRequest || 1, Math.max(1, Math.floor(request.count || 1)));
+    if (capability?.family === "grok") {
+        return {
+            count,
+            aspect_ratio: capability.aspectRatios?.includes(request.size || "") ? request.size : "1:1",
+            resolution: (capability.resolutions?.find((value) => value.toLowerCase() === request.resolution?.toLowerCase()) || capability.resolutions?.[0] || "1k").toLowerCase(),
+        };
+    }
     const output: Record<string, unknown> = { count, format: "png" };
     if (model.startsWith("gemini-")) {
         const dimensions = request.size?.match(/^(\d+)x(\d+)$/);
@@ -708,6 +711,19 @@ export function buildSuperTokenImageOutput(model: string, request: ImageRequest)
     if (request.quality && request.quality !== "auto") output.quality = request.quality;
     if (request.background === "transparent") output.background = "transparent";
     return output;
+}
+
+export function buildSuperTokenImageTaskPayload(model: string, request: ImageRequest) {
+    return {
+        model,
+        operation: request.references.length ? "edit" as const : "generation" as const,
+        input: {
+            prompt: request.prompt,
+            ...(request.references.length ? { images: request.references.map((item) => ({ url: item.url })) } : {}),
+            ...(request.mask?.url ? { mask: { url: request.mask.url } } : {}),
+        },
+        output: buildSuperTokenImageOutput(model, request),
+    };
 }
 
 export function buildSuperTokenVideoPayload(params: {
