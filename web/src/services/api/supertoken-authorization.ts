@@ -1,6 +1,6 @@
 import { SUPERTOKEN_AUTH_BASE_URL } from "@/constant/runtime-config";
 import type { SuperTokenRegion } from "@/lib/supertoken-capabilities";
-import { createSuperTokenChannel, type ModelChannel } from "@/stores/use-config-store";
+import { createSuperTokenChannel, type ModelChannel, type SuperTokenChannelConfig } from "@/stores/use-config-store";
 
 export const SUPERTOKEN_AUTHORIZATION_MESSAGE = "infinite-canvas:supertoken-authorization";
 const SUPERTOKEN_CLIENT_ID = "infinite-canvas";
@@ -22,6 +22,12 @@ export type SuperTokenAuthorizationResult = {
     image_models: string[];
     video_models: string[];
     authorized_at: number;
+};
+
+export type SuperTokenModelSyncResult = {
+    image_models: string[];
+    video_models: string[];
+    synced_at: number;
 };
 
 export class SuperTokenAuthorizationError extends Error {
@@ -94,6 +100,52 @@ export function authorizedSuperTokenChannel(
             videoModels: result.video_models,
             syncedAt,
             authorizedAt: result.authorized_at * 1000,
+        },
+    });
+}
+
+export async function syncAuthorizedSuperTokenModels(settings: SuperTokenChannelConfig): Promise<SuperTokenModelSyncResult> {
+    let response: Response;
+    try {
+        response = await fetch(`${superTokenAuthorizationBaseUrl()}/api/canvas/authorization/sync`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${settings.resourceApiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: SUPERTOKEN_CLIENT_ID,
+                image_api_key: settings.imageApiKey,
+                video_api_key: settings.videoApiKey,
+            }),
+            cache: "no-store",
+        });
+    } catch {
+        throw new SuperTokenAuthorizationError("network_error", "无法连接 SuperToken 模型同步服务");
+    }
+    const body = (await response.json().catch(() => null)) as (SuperTokenModelSyncResult & { error?: string; error_description?: string }) | null;
+    if (!response.ok || !body || body.error) {
+        throw new SuperTokenAuthorizationError(body?.error || "sync_failed", body?.error_description || "SuperToken 模型同步失败");
+    }
+    if (
+        !Array.isArray(body.image_models) ||
+        !body.image_models.every((model) => typeof model === "string") ||
+        !Array.isArray(body.video_models) ||
+        !body.video_models.every((model) => typeof model === "string")
+    ) {
+        throw new SuperTokenAuthorizationError("invalid_response", "SuperToken 模型同步响应无效");
+    }
+    return body;
+}
+
+export function syncedSuperTokenChannel(channel: ModelChannel, result: SuperTokenModelSyncResult, syncedAt = Date.now()) {
+    return createSuperTokenChannel({
+        ...channel,
+        supertoken: {
+            ...channel.supertoken!,
+            imageModels: result.image_models,
+            videoModels: result.video_models,
+            syncedAt,
         },
     });
 }
