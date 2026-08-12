@@ -275,8 +275,10 @@ describe("SuperToken request mapping", () => {
         expect(superTokenMediaUploadCacheKey("channel-1", "https://hk.supertoken.cc", "video:2")).not.toBe(first);
     });
 
-    test("retries only missing or expired reference media errors", () => {
+    test("retries missing, expired, or failed reference downloads", () => {
         expect(isSuperTokenReferenceMediaUnavailable({ error: { code: "reference_media_expired", message: "reference expired" } })).toBe(true);
+        expect(isSuperTokenReferenceMediaUnavailable({ error: { code: "reference_download_failed", message: "reference download failed" } })).toBe(true);
+        expect(isSuperTokenReferenceMediaUnavailable({ code: "invalid_request", message: "reference download failed" })).toBe(true);
         expect(isSuperTokenReferenceMediaUnavailable({ detail: { code: "invalid_reference_media", message: "staged media is missing or incomplete" } })).toBe(true);
         expect(isSuperTokenReferenceMediaUnavailable({ code: "video_task_failed", message: "reference media not found" })).toBe(true);
         expect(isSuperTokenReferenceMediaUnavailable(new Error("确认媒体上传失败：upload not found"))).toBe(true);

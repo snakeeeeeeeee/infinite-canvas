@@ -637,8 +637,9 @@ export function isSuperTokenReferenceMediaUnavailable(value: unknown) {
     const nested = [record.error, record.detail].find((item) => item && typeof item === "object") as Record<string, unknown> | undefined;
     const code = String(nested?.code || record.code || "").trim().toLowerCase();
     const message = String(nested?.message || record.message || (value instanceof Error ? value.message : "")).trim().toLowerCase();
-    if (["invalid_reference_media", "reference_media_expired", "reference_media_not_found", "media_upload_expired", "media_upload_not_found"].includes(code)) return true;
+    if (["invalid_reference_media", "reference_download_failed", "reference_media_expired", "reference_media_not_found", "media_upload_expired", "media_upload_not_found"].includes(code)) return true;
     if (/(reference|media|upload)/.test(code) && /(expired|not_found|missing|deleted)/.test(code)) return true;
+    if (/(reference|素材|引用)/.test(message) && /(download failed|下载失败)/.test(message)) return true;
     return /(reference|media|upload|素材|引用|媒体|上传)/.test(message) && /(expired|not found|missing|deleted|过期|不存在|丢失|删除)/.test(message);
 }
 
