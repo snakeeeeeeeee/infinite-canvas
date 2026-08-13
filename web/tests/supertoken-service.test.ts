@@ -30,6 +30,7 @@ const {
     mergeSuperTokenTaskProgress,
     mergeSuperTokenTaskRemoteState,
     parseSuperTokenRetryAfter,
+    randomSuperTokenTaskPollMs,
     superTokenMediaUploadCacheKey,
     superTokenImageSlotIdempotencyKey,
 } = await import("../src/services/api/supertoken");
@@ -346,10 +347,12 @@ describe("SuperToken async controls", () => {
         expect(superTokenImageSlotIdempotencyKey("log-1", 1)).not.toBe(superTokenImageSlotIdempotencyKey("log-1", 0));
     });
 
-    test("honors numeric and HTTP-date Retry-After values", () => {
+    test("honors Retry-After and randomizes missing intervals between 5 and 10 seconds", () => {
         const now = Date.UTC(2026, 7, 6, 12, 0, 0);
         expect(parseSuperTokenRetryAfter("3", now)).toBe(3000);
         expect(parseSuperTokenRetryAfter(new Date(now + 12000).toUTCString(), now)).toBe(12000);
-        expect(parseSuperTokenRetryAfter("invalid", now)).toBe(2000);
+        expect(parseSuperTokenRetryAfter("invalid", now, () => 0)).toBe(5000);
+        expect(parseSuperTokenRetryAfter(undefined, now, () => 0.5)).toBe(7500);
+        expect(randomSuperTokenTaskPollMs(() => 1)).toBe(10000);
     });
 });

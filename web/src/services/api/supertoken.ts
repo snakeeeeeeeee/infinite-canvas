@@ -97,6 +97,8 @@ type CachedMediaUpload = Pick<MediaUploadResult, "id" | "client_id" | "kind" | "
 
 const taskStore = localforage.createInstance({ name: "infinite-canvas", storeName: "supertoken_async_tasks" });
 const mediaUploadStore = localforage.createInstance({ name: "infinite-canvas", storeName: "supertoken_media_uploads" });
+const MIN_TASK_POLL_MS = 5000;
+const MAX_TASK_POLL_MS = 10000;
 const DEFAULT_RETRY_MS = 2000;
 export const SUPERTOKEN_MEDIA_REFRESH_MARGIN_SECONDS = 30 * 60;
 
@@ -296,7 +298,12 @@ export async function pollSuperTokenVideoTask(config: SuperTokenRequestConfig, t
     } catch (error) {
         if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
         reportRouteFailure(task.baseUrl, config.resourceApiKey, error);
-        if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs || DEFAULT_RETRY_MS };
+        if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) {
+            task.retryAfterMs = randomSuperTokenTaskPollMs();
+            task.updatedAt = Date.now();
+            await taskStore.setItem(task.id, task);
+            return { status: "pending" as const, progress: task.progress, progressKnown: task.progressKnown, retryAfterMs: task.retryAfterMs };
+        }
         return { status: "failed" as const, error: await apiErrorMessage(error, "视频任务查询失败") };
     }
 }
@@ -318,13 +325,11 @@ export async function removeSuperTokenTask(taskId: string) {
 }
 
 async function waitForTask<T>(task: SuperTokenTaskRecord, resourceApiKey: string, options: RequestOptions) {
-    let transientErrors = 0;
     for (;;) {
-        await delay(task.retryAfterMs || DEFAULT_RETRY_MS, options.signal);
+        await delay(task.retryAfterMs || randomSuperTokenTaskPollMs(), options.signal);
         try {
             const response = await queryTask<T>(task, resourceApiKey, options.signal);
             const state = response.data;
-            transientErrors = 0;
             await updateStoredTaskFromRemote(task, state, response.headers["retry-after"]);
             options.onProgress?.({ ...task });
             if (state.status === "succeeded") return state;
@@ -333,8 +338,9 @@ async function waitForTask<T>(task: SuperTokenTaskRecord, resourceApiKey: string
             if (isAbort(error)) throw new DOMException("Aborted", "AbortError");
             reportRouteFailure(task.baseUrl, resourceApiKey, error);
             if (axios.isAxiosError(error) && isTransientStatus(error.response?.status)) {
-                transientErrors += 1;
-                await delay(Math.min(15000, DEFAULT_RETRY_MS * 2 ** Math.min(transientErrors, 3)), options.signal);
+                task.retryAfterMs = randomSuperTokenTaskPollMs();
+                task.updatedAt = Date.now();
+                await taskStore.setItem(task.id, task);
                 continue;
             }
             throw new Error(await apiErrorMessage(error, "任务查询失败"));
@@ -398,7 +404,7 @@ export function mergeSuperTokenTaskRemoteState<T>(task: SuperTokenTaskRecord, st
         ...task,
         status: state.status === "failed" ? "failed" : task.status === "succeeded" ? "succeeded" : "pending",
         ...mergeSuperTokenTaskProgress(task, state),
-        retryAfterMs: retryAfter === undefined ? task.retryAfterMs : parseRetryAfter(retryAfter),
+        retryAfterMs: parseRetryAfter(retryAfter),
         updatedAt: Date.now(),
         error: state.error ? formatSuperTokenTaskError(state.error, "任务执行失败") : undefined,
     };
@@ -805,14 +811,18 @@ function authHeaders(key: string) {
     return { Authorization: `Bearer ${key}` };
 }
 
-export function parseSuperTokenRetryAfter(value: unknown, now = Date.now()) {
+export function randomSuperTokenTaskPollMs(random = Math.random) {
+    return Math.min(MAX_TASK_POLL_MS, MIN_TASK_POLL_MS + Math.floor(random() * (MAX_TASK_POLL_MS - MIN_TASK_POLL_MS + 1)));
+}
+
+export function parseSuperTokenRetryAfter(value: unknown, now = Date.now(), random = Math.random) {
     const seconds = Number(value);
     if (Number.isFinite(seconds) && seconds > 0) return Math.min(300000, seconds * 1000);
     if (typeof value === "string") {
         const date = Date.parse(value);
         if (Number.isFinite(date) && date > now) return Math.min(300000, date - now);
     }
-    return DEFAULT_RETRY_MS;
+    return randomSuperTokenTaskPollMs(random);
 }
 
 function parseRetryAfter(value: unknown) {

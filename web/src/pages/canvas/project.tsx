@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion, resumeImageGenerationTask } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { pollVideoGenerationTask, requestVideoGeneration, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
-import { getSuperTokenTask, type SuperTokenTaskRecord } from "@/services/api/supertoken";
+import { getSuperTokenTask, randomSuperTokenTaskPollMs, type SuperTokenTaskRecord } from "@/services/api/supertoken";
 import { defaultConfig, resolveModelRequestConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { storeGeneratedImage, uploadImage } from "@/services/image-storage";
 import { uploadMediaFile } from "@/services/file-storage";
@@ -554,7 +554,7 @@ function InfiniteCanvasPage() {
                                 terminalOutcome = "success";
                                 break;
                             }
-                            await waitForCanvasTask(state.retryAfterMs || task.retryAfterMs || 2000, controller.signal);
+                            await waitForCanvasTask(state.retryAfterMs || task.retryAfterMs || randomSuperTokenTaskPollMs(), controller.signal);
                         }
                     }
                 } catch (error) {
