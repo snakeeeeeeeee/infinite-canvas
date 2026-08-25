@@ -372,9 +372,8 @@ function normalizeImageCount(value: string) {
     return String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 3))));
 }
 
-function apiFormatLabel(apiFormat: ApiCallFormat, t: TFunction) {
+function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
-    if (apiFormat === "ark") return t("config.protocols.ark");
     return "OpenAI";
 }
 

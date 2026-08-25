@@ -25,7 +25,6 @@ type CanvasNodeProps = {
     isFocusRelated: boolean;
     isConnectionTarget: boolean;
     isConnecting: boolean;
-    editRequestNonce?: number;
     showPanel: boolean;
     showImageInfo: boolean;
     mentionReferences?: CanvasResourceReference[];
@@ -54,7 +53,7 @@ type CanvasNodeProps = {
     onDeleteBatchImage?: (nodeId: string, imageId: string) => void;
     onRetry?: (node: CanvasNodeData) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
-    onViewImage?: (node: CanvasNodeData) => void;
+    onViewImage?: (node: CanvasNodeData, imageId?: string) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
 };
 
@@ -79,6 +78,7 @@ type NodeContentRendererProps = {
     onDownloadBatchImage?: (imageId: string) => void;
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
+    onViewBatchImage?: (imageId: string) => void;
     groupChildCount: number;
 };
 
@@ -90,7 +90,6 @@ export const CanvasNode = React.memo(function CanvasNode({
     isFocusRelated,
     isConnectionTarget,
     isConnecting,
-    editRequestNonce = 0,
     showPanel,
     showImageInfo,
     mentionReferences = [],
@@ -202,11 +201,6 @@ export const CanvasNode = React.memo(function CanvasNode({
         textarea?.focus();
         textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
     }, [isEditingContent]);
-
-    useEffect(() => {
-        if (!editRequestNonce || data.type !== CanvasNodeType.Text) return;
-        setIsEditingContent(true);
-    }, [data.type, editRequestNonce]);
 
     useEffect(() => {
         if (!isEditingContent) return;
@@ -378,11 +372,6 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
                 onMouseDown={(event) => onMouseDown(event, data.id)}
                 onDoubleClick={(event) => {
-                    if (isBatchRoot) {
-                        event.stopPropagation();
-                        onToggleBatch?.(data.id);
-                        return;
-                    }
                     if (definition?.onDoubleClick && pluginContext) {
                         if (definition.onDoubleClick(pluginContext)) event.stopPropagation();
                         return;
@@ -427,6 +416,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onDownloadBatchImage={(imageId) => onDownloadBatchImage?.(data, imageId)}
                         onRetryBatchImage={(imageId) => onRetryBatchImage?.(data, imageId)}
                         onDeleteBatchImage={(imageId) => onDeleteBatchImage?.(data.id, imageId)}
+                        onViewBatchImage={(imageId) => onViewImage?.(data, imageId)}
                         groupChildCount={groupChildCount}
                     />
                 </div>
@@ -628,6 +618,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
             onDownloadBatchImage={props.onDownloadBatchImage}
             onRetryBatchImage={props.onRetryBatchImage}
             onDeleteBatchImage={props.onDeleteBatchImage}
+            onViewBatchImage={props.onViewBatchImage}
         />
     );
 }
@@ -685,6 +676,7 @@ function ImageContent({
     onDownloadBatchImage,
     onRetryBatchImage,
     onDeleteBatchImage,
+    onViewBatchImage,
 }: {
     node: CanvasNodeData;
     batchExpanded: boolean;
@@ -694,6 +686,7 @@ function ImageContent({
     onDownloadBatchImage?: (imageId: string) => void;
     onRetryBatchImage?: (imageId: string) => void;
     onDeleteBatchImage?: (imageId: string) => void;
+    onViewBatchImage?: (imageId: string) => void;
 }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const { t } = useTranslation();
@@ -705,7 +698,7 @@ function ImageContent({
     const primaryContent = primaryImage?.content || node.metadata?.content;
 
     return (
-        <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded} onToggleBatch={onToggleBatch}>
+        <BatchFrame batchCount={batchCount} batchExpanded={batchExpanded}>
             {batchExpanded
                 ? images
                       .filter((image) => image.id !== primaryImageId)
@@ -715,6 +708,7 @@ function ImageContent({
                               node={node}
                               image={image}
                               index={index}
+                              onView={() => onViewBatchImage?.(image.id)}
                               onSetPrimary={() => onSetBatchPrimary?.(image.id)}
                               onDuplicate={() => onDuplicateBatchImage?.(image.id)}
                               onDownload={() => onDownloadBatchImage?.(image.id)}
@@ -774,6 +768,7 @@ function ExpandedImageCard({
     node,
     image,
     index,
+    onView,
     onSetPrimary,
     onDuplicate,
     onDownload,
@@ -783,6 +778,7 @@ function ExpandedImageCard({
     node: CanvasNodeData;
     image: CanvasNodeImage;
     index: number;
+    onView: () => void;
     onSetPrimary: () => void;
     onDuplicate: () => void;
     onDownload: () => void;
@@ -820,7 +816,11 @@ function ExpandedImageCard({
             }
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => {
+                if (!image.content || (event.target instanceof Element && event.target.closest("button"))) return;
+                event.stopPropagation();
+                onView();
+            }}
         >
             {image.content ? <img src={image.content} alt={node.title} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" /> : <ImageSlotStatus image={image} />}
             {image.content ? (
@@ -929,21 +929,11 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
     );
 }
 
-function BatchFrame({ batchCount, batchExpanded, onToggleBatch, children }: { batchCount: number; batchExpanded: boolean; onToggleBatch?: () => void; children: ReactNode }) {
+function BatchFrame({ batchCount, batchExpanded, children }: { batchCount: number; batchExpanded: boolean; children: ReactNode }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const isBatchRoot = batchCount > 1;
     return (
-        <div
-            className="group/batch relative h-full w-full overflow-visible"
-            onDoubleClick={
-                isBatchRoot
-                    ? (event) => {
-                          event.stopPropagation();
-                          onToggleBatch?.();
-                      }
-                    : undefined
-            }
-        >
+        <div className="group/batch relative h-full w-full overflow-visible">
             {isBatchRoot ? (
                 <div className="pointer-events-none absolute inset-0 overflow-visible">
                     {Array.from({ length: Math.min(batchCount - 1, 3) }).map((_, index) => (

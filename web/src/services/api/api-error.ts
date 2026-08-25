@@ -17,6 +17,7 @@ export function formatApiErrorPayload(value: unknown, fallback = "", status?: nu
 export async function apiErrorMessage(error: unknown, fallback: string) {
     if (isApiRequestCanceled(error)) return apiText("requestCanceled");
     if (axios.isAxiosError(error)) {
+        if (!error.response && error.code === "ERR_NETWORK") return apiText("corsRequired");
         const responseData = await readableResponseData(error.response?.data);
         const formatted = formatApiErrorPayload(responseData, "", error.response?.status);
         return formatted || error.message || fallback;
