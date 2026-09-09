@@ -216,12 +216,16 @@ describe("SuperToken image catalog", () => {
         expect(superTokenUnsupportedModels(["gpt-image-2", "gemini-3.1-flash-image-preview"], ["unknown-video"])).toEqual(["gemini-3.1-flash-image-preview", "unknown-video"]);
     });
 
-    test("exposes only returned GPT 2.5 SKUs and separates Adobe batch limits", () => {
+    test("exposes only returned GPT 2.5 SKUs and preserves Azure and Adobe batch limits", () => {
         const models = ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst-count", "gpt-image-2.5-flare-count", "adobe-gpt-image-2.5-sunburst-count", "adobe-gpt-image-2.5-flare-count"];
         expect(superTokenSelectableModels(models, []).map((item) => item.name)).toEqual(models);
         expect(superTokenSelectableModels([models[4]], [])).toEqual([{ name: models[4], capability: "image" }]);
         expect(superTokenUnsupportedModels(["adobe-gpt-image-2.5-flare", "gpt-image-2.5-unknown"], [])).toHaveLength(2);
-        expect(superTokenImageBatchPlan(models[4], 12)).toEqual([10, 2]);
+        for (const model of [models[0], models[1], models[4], models[5]]) {
+            expect(canUseSuperTokenNativeImageBatch(model, 10)).toBe(true);
+            expect(canUseSuperTokenNativeImageBatch(model, 11)).toBe(false);
+            expect(superTokenImageBatchPlan(model, 12)).toEqual([10, 2]);
+        }
         expect(superTokenImageBatchPlan(models[3], 3)).toEqual([1, 1, 1]);
         expect(superTokenImageCapability("adobe-gpt-image-2-count")).toMatchObject({ mask: false, transparentBackground: false });
         expect(superTokenImageCapability(models[4])).toMatchObject({ mask: false, transparentBackground: false });

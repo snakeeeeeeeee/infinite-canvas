@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- [修复] Azure GPT Image 2.5 Sunburst / Flare 与 Adobe 一样支持单次最多 10 张，修正模型选择器提示及批量任务拆分。
+
 - [新增] 接入 SuperToken GPT Image 2.5 Sunburst / Flare 的六个公开型号，并按版本分组展示渠道与批量能力。
 - [修复] 已授权 SuperToken 渠道手动刷新时同步原 Token 模型权限，并展示最近同步时间与失败原因。
 - [修复] Adobe GPT Image 隐藏不受支持的透明背景选项并拒绝蒙版请求。

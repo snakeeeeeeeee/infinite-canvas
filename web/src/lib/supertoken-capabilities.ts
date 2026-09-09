@@ -272,8 +272,6 @@ export function superTokenImageCapability(model: string): SuperTokenImageCapabil
         ...base,
         model,
         label: `GPT Image 2.5 ${match[2] === "sunburst" ? "Sunburst" : "Flare"}`,
-        // Adobe batches share the existing adapter; other new routes remain single-output.
-        maxOutputsPerRequest: provider === "adobe" ? 10 : 1,
         mask: false,
         transparentBackground: false,
     };

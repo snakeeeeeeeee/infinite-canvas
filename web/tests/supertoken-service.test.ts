@@ -142,6 +142,14 @@ describe("SuperToken request mapping", () => {
         expect(payload.output).toMatchObject({ count: 2, size: "1536x1024", quality: "medium" });
     });
 
+    test("keeps ten Azure 2.5 outputs in one task", () => {
+        for (const model of ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]) {
+            const payload = buildSuperTokenImageTaskPayload(model, { prompt: "test", references: [], count: 10 });
+            expect(payload.model).toBe(model);
+            expect(payload.output.count).toBe(10);
+        }
+    });
+
     test("maps native multi-image counts only for models that support them", () => {
         expect(buildSuperTokenImageOutput("gpt-image-2", { prompt: "test", references: [], count: 6 })).toEqual({ count: 6, format: "png" });
         expect(buildSuperTokenImageOutput("adobe-gpt-image-2-count", { prompt: "test", references: [], count: 4 })).toEqual({ count: 4, format: "png" });
