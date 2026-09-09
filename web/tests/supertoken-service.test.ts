@@ -130,6 +130,18 @@ describe("SuperToken request mapping", () => {
         expect(buildSuperTokenImageRequest("gpt-image-2", { ...config, size: "9:16" }, { prompt: "generate", references: [] }).size).toBe("1024x1824");
     });
 
+    test("preserves GPT 2.5 public aliases, ordered edits and batch output", () => {
+        const model = "adobe-gpt-image-2.5-flare-count";
+        const payload = buildSuperTokenImageTaskPayload(model, {
+            prompt: "edit", references: ["first", "second"].map((id) => ({ id, name: id, type: "image/png", dataUrl: "", url: `https://example.com/${id}.png` })),
+            size: "1536x1024", quality: "medium", count: 2,
+        });
+        expect(payload.model).toBe(model);
+        expect(payload.operation).toBe("edit");
+        expect(payload.input.images).toEqual([{ url: "https://example.com/first.png" }, { url: "https://example.com/second.png" }]);
+        expect(payload.output).toMatchObject({ count: 2, size: "1536x1024", quality: "medium" });
+    });
+
     test("maps native multi-image counts only for models that support them", () => {
         expect(buildSuperTokenImageOutput("gpt-image-2", { prompt: "test", references: [], count: 6 })).toEqual({ count: 6, format: "png" });
         expect(buildSuperTokenImageOutput("adobe-gpt-image-2-count", { prompt: "test", references: [], count: 4 })).toEqual({ count: 4, format: "png" });

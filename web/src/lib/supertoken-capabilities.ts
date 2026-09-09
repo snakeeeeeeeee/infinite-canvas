@@ -210,7 +210,7 @@ export const SUPERTOKEN_VIDEO_CAPABILITIES: SuperTokenVideoCapability[] = [
 export const SUPERTOKEN_IMAGE_CAPABILITIES: SuperTokenImageCapability[] = [
     { model: "gpt-image-2", label: "GPT Image 2", family: "gpt-image", provider: "azure", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true, transparentBackground: true },
     { model: "gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "third-party", displayResolution: { max: "1.5K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 1, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true, transparentBackground: true },
-    { model: "adobe-gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "adobe", positioning: "balanced", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: true, transparentBackground: true },
+    { model: "adobe-gpt-image-2-count", label: "GPT Image 2", family: "gpt-image", provider: "adobe", positioning: "balanced", displayResolution: { min: "1K", max: "4K" }, operations: ["generation", "edit"], maxImages: 10, maxOutputsPerRequest: 10, qualities: ["auto", "low", "medium", "high"], formats: ["png"], mask: false, transparentBackground: false },
     {
         model: "gemini-3.1-flash-image",
         label: "Gemini 3.1 Flash Image",
@@ -261,8 +261,22 @@ export function superTokenVideoCapability(family: string): SuperTokenVideoCapabi
     return SUPERTOKEN_VIDEO_CAPABILITIES.find((item) => item.family === family) || dynamicSeedanceCapability(family);
 }
 
-export function superTokenImageCapability(model: string) {
-    return SUPERTOKEN_IMAGE_CAPABILITIES.find((item) => item.model === model);
+export function superTokenImageCapability(model: string): SuperTokenImageCapability | undefined {
+    const registered = SUPERTOKEN_IMAGE_CAPABILITIES.find((item) => item.model === model);
+    if (registered) return registered;
+    const match = model.match(/^(adobe-)?gpt-image-2\.5-(sunburst|flare)(-count)?$/);
+    if (!match || (match[1] && !match[3])) return undefined;
+    const provider = match[1] ? "adobe" : match[3] ? "third-party" : "azure";
+    const base = SUPERTOKEN_IMAGE_CAPABILITIES.find((item) => item.family === "gpt-image" && item.provider === provider)!;
+    return {
+        ...base,
+        model,
+        label: `GPT Image 2.5 ${match[2] === "sunburst" ? "Sunburst" : "Flare"}`,
+        // Adobe batches share the existing adapter; other new routes remain single-output.
+        maxOutputsPerRequest: provider === "adobe" ? 10 : 1,
+        mask: false,
+        transparentBackground: false,
+    };
 }
 
 export function canUseSuperTokenNativeImageBatch(model: string, count: number) {

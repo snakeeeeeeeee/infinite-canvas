@@ -25,6 +25,7 @@ type ImageOption = {
     value: string;
     family: FamilyId;
     order: number;
+    group: string;
     recommended: boolean;
     title: string;
     alias: string;
@@ -108,7 +109,7 @@ export function ImageModelPicker({ config, value, onChange, className, fullWidth
                     collisionPadding={12}
                     className={cn(
                         "z-[1200] origin-[var(--radix-popover-content-transform-origin)] rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-2xl outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
-                        compact ? "w-[min(560px,calc(100vw-24px))]" : "w-[min(720px,calc(100vw-24px))]",
+                        compact ? "w-[min(460px,calc(100vw-24px))]" : "w-[min(560px,calc(100vw-24px))]",
                     )}
                     onPointerDown={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
@@ -155,7 +156,7 @@ function ImagePickerPanel({ items, selectedValue, family, compact, onFamilyChang
                         onClick={() => onFamilyChange(familyId)}
                         className={cn(
                             "flex flex-1 items-center justify-center rounded-md transition-colors",
-                            compact ? "min-w-[120px] gap-2 px-2 py-1.5 text-[13px]" : "min-w-[150px] gap-2.5 px-3 py-2 text-sm",
+                            compact ? "min-w-fit gap-2 px-2 py-1.5 text-[13px]" : "min-w-fit gap-2.5 px-3 py-2 text-sm",
                             activeFamily === familyId ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                         )}
                     >
@@ -167,9 +168,16 @@ function ImagePickerPanel({ items, selectedValue, family, compact, onFamilyChang
 
             <div className={cn("min-h-0 flex-1 overflow-y-auto", compact ? "px-2 py-2" : "px-3 py-3 sm:px-4")}>
                 {visibleItems.length ? (
-                    <div className={cn("grid sm:grid-cols-2", compact ? "gap-1.5" : "gap-2")}>
-                        {visibleItems.map((item) => (
-                            <ImageOptionCard key={item.value} item={item} selected={item.value === selectedValue} compact={compact} onSelect={onSelect} />
+                    <div className="space-y-3">
+                        {[...new Set(visibleItems.map((item) => item.group))].map((group) => (
+                            <div key={group}>
+                                {group ? <div className="mb-1 px-2 text-[13px] font-medium text-foreground">{group}</div> : null}
+                                <div className={cn("grid gap-1", !group && "sm:grid-cols-2")}>
+                                    {visibleItems.filter((item) => item.group === group).map((item) => (
+                                        <ImageOptionCard key={item.value} item={item} selected={item.value === selectedValue} compact={compact} onSelect={onSelect} />
+                                    ))}
+                                </div>
+                            </div>
                         ))}
                     </div>
                 ) : (
@@ -186,21 +194,23 @@ function ImageOptionCard({ item, selected, compact, onSelect }: { item: ImageOpt
         <button
             type="button"
             aria-pressed={selected}
+            aria-label={item.triggerLabel}
+            title={item.triggerLabel}
             onClick={() => onSelect(item.value)}
             className={cn(
-                "group flex w-full items-start rounded-lg border text-left transition-colors",
-                compact ? "min-h-[74px] gap-2 px-2.5 py-2" : "min-h-[88px] gap-3 px-3 py-2.5",
-                selected ? "border-foreground bg-accent" : "border-border/80 hover:border-foreground/35 hover:bg-accent/60",
+                "group flex w-full items-start rounded-lg text-left transition-colors",
+                compact ? "gap-2 px-2.5 py-2" : "gap-3 px-3 py-2.5",
+                selected ? "bg-accent" : "hover:bg-accent/60",
             )}
         >
-            <span className="min-w-0 flex-1">
+            <span className={cn("min-w-0 flex-1", item.group && "flex flex-wrap items-center justify-between gap-x-3 gap-y-1")}>
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className={cn("break-words font-medium", compact ? "text-[13px]" : "text-sm")}>{item.title}</span>
-                    {item.alias ? <span className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.alias}</span> : null}
+                    <span className={cn("break-words font-medium", compact ? "text-[13px]" : "text-sm")}>{item.group ? item.alias : item.title}</span>
+                    {item.alias && !item.group ? <span className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.alias}</span> : null}
                     {item.recommended ? <span className={cn("inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400", compact ? "text-[11px]" : "text-xs")}><Sparkles className="size-3" />{t("settingsPanels.imageModelPicker.recommended")}</span> : null}
                 </span>
-                <span className={cn("mt-1.5 block text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.detail}</span>
-                <span className={cn("mt-1 block font-medium text-foreground/75", compact ? "text-[11px]" : "text-xs")}>{item.capability}</span>
+                <span className={cn("block text-muted-foreground", !item.group && "mt-1.5", compact ? "text-[11px]" : "text-xs")}>{item.detail}</span>
+                {!item.group ? <span className={cn("mt-1 block font-medium text-foreground/75", compact ? "text-[11px]" : "text-xs")}>{item.capability}</span> : null}
             </span>
             <span className={cn("mt-1 flex shrink-0 items-center justify-center rounded-full border", compact ? "size-[18px]" : "size-5", selected ? "border-foreground bg-foreground text-background" : "border-muted-foreground/55")}>
                 {selected ? <Check className={compact ? "size-3" : "size-3.5"} strokeWidth={3} /> : null}
@@ -220,6 +230,7 @@ function buildImageOption(config: AiConfig, value: string, t: TFunction): ImageO
             value,
             family: "other",
             order: 0,
+            group: "",
             recommended: false,
             title: model,
             alias: channel?.name || t("settingsPanels.imageModelPicker.customProvider"),
@@ -243,10 +254,11 @@ function buildImageOption(config: AiConfig, value: string, t: TFunction): ImageO
     return {
         value,
         family: capability.family,
-        order: capability.family === "gpt-image" ? providerOrder(capability.provider) : capability.positioning === "fast" ? 0 : 1,
+        order: capability.family === "gpt-image" ? (capability.label.includes("Sunburst") ? 0 : capability.label.includes("Flare") ? 10 : 20) + providerOrder(capability.provider) : capability.positioning === "fast" ? 0 : 1,
+        group: capability.family === "gpt-image" ? capability.label : "",
         recommended: capability.provider === "adobe" || capability.alias === "small-banana",
-        title: capability.family === "gpt-image" ? provider : capability.label,
-        alias,
+        title: capability.label,
+        alias: capability.family === "gpt-image" ? provider : alias,
         detail: [positioning, resolution, outputs].filter(Boolean).join(" · "),
         capability: t("settingsPanels.imageModelPicker.generateAndEdit"),
         triggerLabel,

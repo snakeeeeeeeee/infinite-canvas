@@ -5,8 +5,9 @@ import { useTranslation } from "react-i18next";
 
 import { superTokenBaseUrl, superTokenUnsupportedModels } from "@/lib/supertoken-capabilities";
 import { fetchSuperTokenModels, testSuperTokenResourceKey } from "@/services/api/supertoken";
-import { authorizedSuperTokenChannel, authorizeSuperToken, SuperTokenAuthorizationError } from "@/services/api/supertoken-authorization";
+import { authorizedSuperTokenChannel, authorizeSuperToken, syncAuthorizedSuperTokenModels, syncedSuperTokenChannel, SuperTokenAuthorizationError } from "@/services/api/supertoken-authorization";
 import { createModelChannel, createSuperTokenChannel, defaultBaseUrlForApiFormat, guessCapability, normalizeChannelModels, type ApiCallFormat, type ChannelModel, type ModelCapability, type ModelChannel, type SuperTokenChannelConfig } from "@/stores/use-config-store";
+import { isAuthorizedSuperTokenChannel } from "@/services/api/supertoken-model-sync";
 import { ModelScriptEditor } from "./model-script-editor";
 import { ModelSelectModal } from "./model-select-modal";
 
@@ -20,6 +21,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const [scriptTarget, setScriptTarget] = useState<ScriptTarget | null>(null);
     const [checking, setChecking] = useState<"image" | "video" | "resource" | "all" | "">("");
     const [authorizing, setAuthorizing] = useState(false);
+    const [syncError, setSyncError] = useState("");
     const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
@@ -28,7 +30,10 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
     const capabilityOptions: Array<{ label: string; value: ModelCapability }> = ["image", "video", "text", "audio"].map((value) => ({ label: t(`config.channelEditor.capabilities.${value}`), value: value as ModelCapability }));
 
     useEffect(() => {
-        if (open && channel) setDraft(channel);
+        if (open && channel) {
+            setDraft(channel);
+            setSyncError("");
+        }
     }, [open, channel]);
 
     if (!draft) return null;
@@ -100,8 +105,17 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
 
     const refreshAll = async () => {
         setChecking("all");
+        setSyncError("");
         try {
             const settings = draft.supertoken!;
+            if (isAuthorizedSuperTokenChannel(draft)) {
+                const result = await syncAuthorizedSuperTokenModels(settings);
+                const next = syncedSuperTokenChannel(draft, result);
+                setDraft(next);
+                onSave(next);
+                message.success(t("config.superToken.availableModelsLoaded", { images: result.image_models.length, videos: result.video_models.length }));
+                return;
+            }
             const imageKey = settings.imageApiKey.trim();
             const videoKey = settings.videoApiKey.trim();
             if (!imageKey && !videoKey) throw new Error(t("config.superToken.refreshKeyRequired"));
@@ -113,7 +127,9 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
             patchSuperToken({ imageModels, videoModels, syncedAt: Date.now() });
             message.success(t("config.superToken.availableModelsLoaded", { images: imageModels.length, videos: videoModels.length }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : t("config.superToken.testFailed"));
+            const description = error instanceof Error ? error.message : t("config.superToken.testFailed");
+            setSyncError(description);
+            message.error(description);
         } finally {
             setChecking("");
         }
@@ -178,6 +194,7 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                     draft={draft}
                     checking={checking}
                     authorizing={authorizing}
+                    syncError={syncError}
                     onPatch={patchSuperToken}
                     onAuthorize={authorize}
                     onTestModels={testModels}
@@ -251,6 +268,7 @@ function SuperTokenEditor({
     draft,
     checking,
     authorizing,
+    syncError,
     onPatch,
     onAuthorize,
     onTestModels,
@@ -260,6 +278,7 @@ function SuperTokenEditor({
     draft: ModelChannel;
     checking: "image" | "video" | "resource" | "all" | "";
     authorizing: boolean;
+    syncError: string;
     onPatch: (value: Partial<SuperTokenChannelConfig>) => void;
     onAuthorize: () => void;
     onTestModels: (kind: "image" | "video") => void;
@@ -294,9 +313,26 @@ function SuperTokenEditor({
                         {settings.authorizedAt ? <div className="mt-0.5 truncate text-xs text-stone-500">{t("config.superToken.connectedAt", { time: new Date(settings.authorizedAt).toLocaleString() })}</div> : null}
                     </div>
                 </div>
-                <Button type="primary" icon={<Link2 className="size-4" />} loading={authorizing} onClick={onAuthorize}>
+                <Button type="primary" icon={<Link2 className="size-4" />} loading={authorizing} disabled={Boolean(checking)} onClick={onAuthorize}>
                     {t(settings.authorizedAt ? "config.superToken.reauthorize" : "config.superToken.connect")}
                 </Button>
+            </div>
+            <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                        <Tag className="m-0">{t("config.superToken.imageModels", { count: settings.imageModels.length })}</Tag>
+                        <Tag className="m-0">{t("config.superToken.videoModels", { count: settings.videoModels.length })}</Tag>
+                        {unsupported.length ? <Tag className="m-0" color="warning">{t("config.superToken.unsupported", { count: unsupported.length })}</Tag> : null}
+                    </div>
+                    <Button type="text" icon={<RefreshCw className="size-4" />} loading={checking === "all"} disabled={authorizing || Boolean(checking && checking !== "all")} onClick={onRefreshAll}>
+                        {t("config.superToken.refreshAll")}
+                    </Button>
+                </div>
+                <div className="text-xs text-muted-foreground" aria-live="polite">
+                    {settings.syncedAt ? t("config.superToken.lastSynced", { time: new Date(settings.syncedAt).toLocaleString() }) : t("config.superToken.neverSynced")}
+                </div>
+                {settings.authorizedAt ? <div className="text-xs text-muted-foreground">{t("config.superToken.syncHint")}</div> : null}
+                {syncError ? <div role="alert" className="text-xs text-destructive">{syncError}</div> : null}
             </div>
             <details className="group">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-1 text-sm font-medium marker:content-none">
@@ -334,16 +370,6 @@ function SuperTokenEditor({
                         onChange={(resourceApiKey) => onPatch({ resourceApiKey, authorizedAt: undefined })}
                         onTest={onTestResource}
                     />
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 pt-4 dark:border-stone-800">
-                        <div className="flex flex-wrap gap-2">
-                            <Tag className="m-0">{t("config.superToken.imageModels", { count: settings.imageModels.length })}</Tag>
-                            <Tag className="m-0">{t("config.superToken.videoModels", { count: settings.videoModels.length })}</Tag>
-                            {unsupported.length ? <Tag className="m-0" color="warning">{t("config.superToken.unsupported", { count: unsupported.length })}</Tag> : null}
-                        </div>
-                        <Button icon={<RefreshCw className="size-4" />} loading={checking === "all"} onClick={onRefreshAll}>
-                            {t("config.superToken.refreshAll")}
-                        </Button>
-                    </div>
                     {unsupported.length ? (
                         <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
                             {t("config.superToken.unsupportedHint")}：{unsupported.join("、")}
