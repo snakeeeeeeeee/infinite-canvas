@@ -17,7 +17,7 @@ import {
 } from "@/lib/supertoken-capabilities";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { getImageBlob, imageToDataUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
-import type { AiConfig } from "@/stores/use-config-store";
+import { withLocalProxy, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { apiErrorMessage, formatApiErrorPayload } from "./api-error";
@@ -441,7 +441,7 @@ async function restoreMaterializedImages(task: SuperTokenTaskRecord): Promise<Su
     const images = await Promise.all(
         current.resultStorageKeys.map(async (storageKey) => {
             const blob = await getImageBlob(storageKey);
-            return blob ? uploadImage(blob, storageKey) : null;
+            return blob ? uploadImage(blob, { storageKey }) : null;
         }),
     );
     if (images.some((image) => !image)) return null;
@@ -456,7 +456,7 @@ async function materializeImageResults(task: SuperTokenTaskRecord, images: TaskR
         const blobs = await Promise.all(images.map((image) => downloadImageResult(image, resourceApiKey, signal)));
         const completedElsewhere = await restoreMaterializedImages(task);
         if (completedElsewhere) return completedElsewhere;
-        const stored = await Promise.all(blobs.map((blob, index) => uploadImage(blob, `image:supertoken:${safeStoragePart(task.id)}:${index}`)));
+        const stored = await Promise.all(blobs.map((blob, index) => uploadImage(blob, { storageKey: `image:supertoken:${safeStoragePart(task.id)}:${index}` })));
         const current = (await taskStore.getItem<SuperTokenTaskRecord>(task.id)) || task;
         const next = {
             ...current,
@@ -578,7 +578,7 @@ async function uploadSuperTokenMedia(config: SuperTokenRequestConfig, inputs: Me
     try {
         await Promise.all(
             sessions.map((session, index) =>
-                axios.request({ method: session.method || "PUT", url: session.upload_url, headers: session.headers || {}, data: inputs[index].blob, signal }),
+                axios.request({ method: session.method || "PUT", url: withLocalProxy(session.upload_url), headers: session.headers || {}, data: inputs[index].blob, signal }),
             ),
         );
     } catch (error) {
@@ -680,19 +680,19 @@ function referenceRemoteUrl(source: ReferenceImage | ReferenceVideo | ReferenceA
 
 async function fetchBlob(url: string) {
     if (!url) throw new Error("参考素材地址为空");
-    return (await axios.get<Blob>(url, { responseType: "blob" })).data;
+    return (await axios.get<Blob>(withLocalProxy(url), { responseType: "blob" })).data;
 }
 
 async function downloadImageResult(image: TaskResultImage, resourceApiKey: string, signal?: AbortSignal) {
     const headers = image.url_auth === "resource_api_key" ? authHeaders(resourceApiKey) : undefined;
-    const blob = (await axios.get<Blob>(image.url, { headers, responseType: "blob", signal })).data;
+    const blob = (await axios.get<Blob>(withLocalProxy(image.url), { headers, responseType: "blob", signal })).data;
     if (!blob.type.startsWith("image/")) throw new Error("图片结果的 MIME 类型无效");
     return blob;
 }
 
 async function downloadVideoResult(video: TaskResultVideo, resourceApiKey: string, signal?: AbortSignal) {
     const headers = video.url_auth === "resource_api_key" ? authHeaders(resourceApiKey) : undefined;
-    const blob = (await axios.get<Blob>(video.url, { headers, responseType: "blob", signal })).data;
+    const blob = (await axios.get<Blob>(withLocalProxy(video.url), { headers, responseType: "blob", signal })).data;
     if (!blob.type.startsWith("video/") && blob.type !== "application/octet-stream") throw new Error("视频结果的 MIME 类型无效");
     return blob;
 }
@@ -804,7 +804,7 @@ function closestRatio(width: number, height: number, ratios: string[]) {
 }
 
 function apiUrl(baseUrl: string, path: string) {
-    return `${baseUrl.replace(/\/+$/, "")}/v1${path}`;
+    return withLocalProxy(`${baseUrl.replace(/\/+$/, "")}/v1${path}`);
 }
 
 function authHeaders(key: string) {
@@ -883,6 +883,7 @@ function defaultMime(kind: MediaUploadInput["kind"]) {
 }
 
 function storedImageResult(image: UploadedImage): SuperTokenGeneratedImage {
+    if (!image.storageKey) throw new Error("SuperToken 图片结果未保存到本地");
     return { id: nanoid(), dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
 }
 

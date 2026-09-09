@@ -45,13 +45,14 @@ export async function resolveMetadataReferences(metadata: CanvasNodeMetadata) {
 export async function hydrateCanvasImages(nodes: CanvasNodeData[]) {
     return Promise.all(
         nodes.map(async (node) => {
-            const content = node.metadata?.content;
-            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveMediaUrl(node.metadata.storageKey, content) } };
-            if (node.type !== CanvasNodeType.Image || !content) return node;
-            const images = await Promise.all((node.metadata?.images || []).map(async (image) => (image.content ? { ...image, content: await resolveImageUrl(image.storageKey, image.content) } : image)));
-            if (node.metadata?.storageKey) return { ...node, metadata: { ...node.metadata, content: await resolveImageUrl(node.metadata.storageKey, content), images } };
+            const metadata = node.metadata;
+            const content = metadata?.content;
+            if ((node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) && metadata?.storageKey) return { ...node, metadata: { ...metadata, content: await resolveMediaUrl(metadata.storageKey, content) } };
+            if (node.type !== CanvasNodeType.Image || !metadata || !content) return node;
+            const images = await Promise.all((metadata.images || []).map(async (image) => (image.content ? { ...image, content: await resolveImageUrl(image.storageKey, image.content) } : image)));
+            if (metadata.storageKey) return { ...node, metadata: { ...metadata, content: await resolveImageUrl(metadata.storageKey, content), images } };
             if (!content.startsWith("data:image/")) return node;
-            return { ...node, metadata: { ...node.metadata, ...imageMetadata(await uploadImage(content)) } };
+            return { ...node, metadata: { ...metadata, ...imageMetadata(await uploadImage(content)) } };
         }),
     );
 }
@@ -83,11 +84,12 @@ export function getGenerationCount(count: string) {
 }
 
 export function getInputSummary(inputs: NodeGenerationInput[]) {
+    const resources = [...new Map(inputs.flatMap((input) => (input.type === "group" ? input.children : [input])).map((input) => [input.nodeId, input])).values()];
     return {
-        textCount: inputs.filter((input) => input.type === "text").length,
-        imageCount: inputs.filter((input) => input.type === "image").length,
-        videoCount: inputs.filter((input) => input.type === "video").length,
-        audioCount: inputs.filter((input) => input.type === "audio").length,
+        textCount: resources.filter((input) => input.type === "text").length,
+        imageCount: resources.filter((input) => input.type === "image").length,
+        videoCount: resources.filter((input) => input.type === "video").length,
+        audioCount: resources.filter((input) => input.type === "audio").length,
     };
 }
 
@@ -105,6 +107,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
         videoGenerateAudio: node?.metadata?.generateAudio || config.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node?.metadata?.watermark || config.videoWatermark || defaultConfig.videoWatermark,
         videoReferenceMode: node?.metadata?.videoReferenceMode || config.videoReferenceMode || defaultConfig.videoReferenceMode,
+        videoMode: node?.metadata?.videoMode || config.videoMode || defaultConfig.videoMode,
         audioVoice: node?.metadata?.audioVoice || config.audioVoice || defaultConfig.audioVoice,
         audioFormat: node?.metadata?.audioFormat || config.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node?.metadata?.audioSpeed || config.audioSpeed || defaultConfig.audioSpeed,
@@ -115,6 +118,10 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     return mode === "video" ? { ...result, ...(superTokenVideoConfigPatch(result, result.model) || {}) } : result;
 }
 
+export function hasResumableVideoTask(node: CanvasNodeData) {
+    return node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId) && !node.metadata?.content;
+}
+
 export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
     const durableOrigins = new Set(
         nodes.flatMap((node) =>
@@ -122,12 +129,12 @@ export function resetInterruptedGeneration(nodes: CanvasNodeData[]) {
         ),
     );
     return nodes.map((node) => {
-        if (node.metadata?.status !== "loading") return node;
+        if (node.metadata?.status !== "loading" || hasResumableVideoTask(node)) return node;
         const images = node.metadata.images?.map((image) => (image.status === "loading" && !image.asyncTaskId ? { ...image, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted") } : image));
         const hasDurableImage = images?.some((image) => image.status === "loading" && image.asyncTaskId);
         const hasDurableNode = Boolean(node.metadata.asyncTaskId || durableOrigins.has(node.id));
         if (hasDurableImage || hasDurableNode) return { ...node, metadata: { ...node.metadata, images } };
-        return { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted"), images } };
+        return { ...node, metadata: { ...node.metadata, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted"), images, texts: node.metadata.texts?.map((text) => text.status === "loading" ? { ...text, status: "error" as const, errorDetails: i18n.t("canvas.generation.interrupted") } : text) } };
     });
 }
 

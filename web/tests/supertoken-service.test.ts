@@ -127,7 +127,7 @@ describe("SuperToken request mapping", () => {
         expect(edit.size).toBe("9:16");
         expect(edit.references).toEqual(references);
         expect(buildSuperTokenImageRequest("gemini-3.1-flash-image", { ...config, size: "4:3" }, { prompt: "generate", references: [] }).size).toBe("4:3");
-        expect(buildSuperTokenImageRequest("gpt-image-2", { ...config, size: "9:16" }, { prompt: "generate", references: [] }).size).toBe("1024x1824");
+        expect(buildSuperTokenImageRequest("gpt-image-2", { ...config, size: "9:16" }, { prompt: "generate", references: [] }).size).toBe("864x1536");
     });
 
     test("preserves GPT 2.5 public aliases, ordered edits and batch output", () => {

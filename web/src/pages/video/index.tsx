@@ -11,8 +11,9 @@ import { GenerationProgress } from "@/components/generation-progress";
 import { ModelPicker } from "@/components/model-picker";
 import { PromptTextArea } from "@/components/prompt-textarea";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
-import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoSizeLabel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, normalizeVideoResolutionValue, normalizeVideoSizeValue, videoModeLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { clampVideoSeconds } from "@/lib/media-size";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { limitPromptText } from "@/lib/prompt-limit";
 import { boolConfig, effectiveReferenceDurationMs, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, superTokenReferenceDurationError, superTokenReferenceDurationPolicy, SEEDANCE_REFERENCE_LIMITS, SEEDANCE_REFERENCE_MAX_DURATION_MS, SEEDANCE_VIDEO_MIME_TYPES, type SuperTokenReferenceDurationPolicy } from "@/lib/seedance-video";
@@ -69,7 +70,7 @@ type GenerationLog = {
     error?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoGenerateAudio" | "videoWatermark" | "videoReferenceMode" | "videoMode">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -472,6 +473,7 @@ export default function VideoPage() {
         if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
         if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
         if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
+        if (log.config.videoMode) updateConfig("videoMode", log.config.videoMode);
         if (log.config.videoReferenceMode) updateConfig("videoReferenceMode", log.config.videoReferenceMode);
         setResults(log.status === "pending" ? [{ id: log.id, status: "pending", ...videoTaskProgress(log.task) }] : log.video ? [{ id: log.video.id, status: "success", video: log.video }] : [{ id: log.id, status: "failed", error: log.error || t("workbench.generationFailed") }]);
         if (log.status === "pending" && log.task) void pollGenerationLog(log);
@@ -625,7 +627,7 @@ export default function VideoPage() {
 
                             <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(selectedVideoConfig.vquality)}p · {videoSizeLabel(selectedVideoConfig.size)} · {normalizeVideoSeconds(selectedVideoConfig.videoSeconds)}s
+                                    {modelOptionLabel(effectiveConfig, model)} · {normalizeResolution(selectedVideoConfig.vquality)}p · {videoSizeLabel(selectedVideoConfig.size)} · {selectedVideoConfig.videoSeconds}s
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {t("workbench.adjust")}
@@ -987,6 +989,7 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         videoGenerateAudio: log.config?.videoGenerateAudio || "true",
         videoWatermark: log.config?.videoWatermark || "false",
         videoReferenceMode: log.config?.videoReferenceMode || "frame",
+        videoMode: log.config?.videoMode === "reference" ? "reference" : "frames",
     };
 }
 
@@ -1000,6 +1003,7 @@ function buildLog({ id, createdAt, prompt, model, config, references, videoRefer
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
         videoReferenceMode: config.videoReferenceMode,
+        videoMode: config.videoMode === "reference" ? "reference" : "frames",
     };
     return {
         id: id || nanoid(),
@@ -1031,18 +1035,18 @@ function buildVideoConfig(config: AiConfig, model: string): AiConfig {
         model,
         videoModel: model,
         size: superToken ? config.size : seedance ? normalizeSeedanceRatio(config.size) : normalizeVideoSize(config.size),
-        videoSeconds: normalizeVideoSeconds(config.videoSeconds),
+        videoSeconds: superToken ? config.videoSeconds : normalizeVideoSeconds(config.videoSeconds),
         vquality: normalizeResolution(config.vquality),
         videoGenerateAudio: String(boolConfig(config.videoGenerateAudio, true)),
         videoWatermark: String(boolConfig(config.videoWatermark, false)),
+        videoMode: config.videoMode === "reference" ? "reference" : "frames",
     };
     return { ...result, ...(superTokenVideoConfigPatch(result, model) || {}) };
 }
 
 function normalizeVideoSeconds(value: string) {
     if (String(value).trim() === "-1") return "-1";
-    const seconds = Math.floor(Number(value) || 6);
-    return String(Math.max(1, Math.min(20, seconds)));
+    return clampVideoSeconds(value);
 }
 
 function normalizeVideoSize(value: string) {

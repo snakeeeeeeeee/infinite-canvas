@@ -46,3 +46,17 @@ describe("Canvas async image recovery", () => {
         expect(restored.find((node) => node.id === "orphan")?.metadata?.status).toBe("error");
     });
 });
+
+
+test("ordinary video recovery coexists with SuperToken recovery and interrupted text batches", () => {
+    const base = { title: "test", position: { x: 0, y: 0 }, width: 100, height: 100 };
+    const restored = resetInterruptedGeneration([
+        { ...base, id: "ordinary", type: CanvasNodeType.Video, metadata: { status: "loading", videoTaskId: "video-1", videoTaskProvider: "gemini" } },
+        { ...base, id: "supertoken", type: CanvasNodeType.Video, metadata: { status: "loading", asyncTaskId: "task-1" } },
+        { ...base, id: "text", type: CanvasNodeType.Text, metadata: { status: "loading", texts: [{ id: "ready", status: "success", content: "keep" }, { id: "pending", status: "loading", content: "" }] } },
+    ]);
+    expect(restored[0].metadata?.status).toBe("loading");
+    expect(restored[1].metadata?.status).toBe("loading");
+    expect(restored[2].metadata?.status).toBe("error");
+    expect(restored[2].metadata?.texts?.map((text) => [text.status, text.content])).toEqual([["success", "keep"], ["error", ""]]);
+});

@@ -187,3 +187,47 @@ describe("Canvas durable task recovery", () => {
         expect(restored[2].metadata?.status).toBe("error");
     });
 });
+
+
+describe("upstream merge integration", () => {
+    test("URL credential imports leave authorized SuperToken channels intact", async () => {
+        const { upsertChannelCredentials } = await import("@/stores/use-config-store");
+        const channel = createSuperTokenChannel({ supertoken: { region: "global", imageApiKey: "image-key", videoApiKey: "video-key", resourceApiKey: "resource-key", imageModels: ["gpt-image-2.5-flare"], videoModels: [], authorizedAt: 1 } });
+        const config = configWithChannels(defaultConfig, [channel]);
+        const result = upsertChannelCredentials(config, { baseUrl: channel.baseUrl, apiKey: "imported-key" });
+        expect(result.status).toBe("created");
+        expect(result.config.channels[0]).toBe(channel);
+        expect(result.config.channels[1].apiKey).toBe("imported-key");
+        expect(result.config.imageModel).toBe(config.imageModel);
+    });
+
+    test("local proxy preserves Ark paths and avoids double forwarding", async () => {
+        const { buildApiUrl, useConfigStore, withLocalProxy } = await import("@/stores/use-config-store");
+        const original = useConfigStore.getState().config;
+        try {
+            useConfigStore.getState().updateConfigPatch({ proxyEnabled: true, proxyUrl: "http://127.0.0.1:23210" });
+            const url = buildApiUrl("https://example.com/api/plan/v3", "/contents/generations/tasks");
+            expect(url).toBe("http://127.0.0.1:23210/https://example.com/api/plan/v3/contents/generations/tasks");
+            expect(withLocalProxy(url)).toBe(url);
+            expect(withLocalProxy("blob:local-image")).toBe("blob:local-image");
+        } finally {
+            useConfigStore.setState({ config: original });
+        }
+    });
+});
+
+test("merged settings render provider-specific video controls", async () => {
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { VideoSettingsPanel } = await import("@/components/video-settings-panel");
+    const { canvasThemes } = await import("@/lib/canvas-theme");
+    const channel = createSuperTokenChannel({ supertoken: { region: "global", imageApiKey: "", videoApiKey: "video", resourceApiKey: "resource", imageModels: [], videoModels: ["grok-imagine-video-720p", "leonardo-minimax-h3-768p"] } });
+    const base = configWithChannels(defaultConfig, [channel]);
+    for (const family of ["grok-imagine-video", "leonardo-minimax-h3"]) {
+        const model = encodeChannelModel(channel.id, family);
+        const config = { ...base, model, ...superTokenVideoConfigPatch(base, model, true) };
+        const html = renderToStaticMarkup(createElement(VideoSettingsPanel, { config, theme: canvasThemes.light, onConfigChange: () => undefined }));
+        expect(html).toContain('type="number"');
+        expect(html).toContain(family === "grok-imagine-video" ? 'min="1"' : "768p");
+    }
+});

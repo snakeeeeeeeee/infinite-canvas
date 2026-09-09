@@ -17,7 +17,7 @@ import { limitPromptText } from "@/lib/prompt-limit";
 import { modelOptionLabel, resolveModelRequestConfig, superTokenImageConfigPatch, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
-import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
+import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { canUseSuperTokenNativeImageBatch, superTokenImageCapability } from "@/lib/supertoken-capabilities";
 import { requestEdit, requestGeneration, resumeImageGenerationTask } from "@/services/api/image";
 import { superTokenImageSlotIdempotencyKey, type SuperTokenTaskRecord } from "@/services/api/supertoken";
@@ -473,8 +473,8 @@ export default function ImagePage() {
             const images = await Promise.all(
                 result.slice(0, batchSize).map(async (image, index) => {
                     const slot = startSlot + index;
-                    const meta = image.width && image.height ? image : await readImageMeta(image.dataUrl);
-                    const nextImage: GeneratedImage = { id: image.id, dataUrl: image.dataUrl, storageKey: image.storageKey, durationMs: performance.now() - itemStartedAt, width: meta.width || 0, height: meta.height || 0, bytes: image.bytes ?? getDataUrlByteSize(image.dataUrl), mimeType: image.mimeType, slot };
+                    const stored = await storeGeneratedImage(image);
+                    const nextImage: GeneratedImage = { id: image.id, dataUrl: stored.url, storageKey: stored.storageKey, durationMs: performance.now() - itemStartedAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, slot };
                     setResults((value) => updateResultAt(value, slot, { status: "success", image: nextImage }));
                     return nextImage;
                 }),
