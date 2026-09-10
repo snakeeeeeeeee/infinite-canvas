@@ -1,11 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { Check, ChevronDown, Image as ImageIcon, Settings2, Sparkles } from "lucide-react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
-import { superTokenImageCapability, type SuperTokenImageFamily } from "@/lib/supertoken-capabilities";
+import { superTokenImageCapability, type SuperTokenImageProvider, type SuperTokenImageFamily } from "@/lib/supertoken-capabilities";
 import { decodeChannelModel, modelOptionLabel, modelOptionName, selectableModelsByCapability, type AiConfig } from "@/stores/use-config-store";
 
 type ImageModelPickerProps = {
@@ -25,13 +25,14 @@ type ImageOption = {
     value: string;
     family: FamilyId;
     order: number;
-    group: string;
+    provider?: SuperTokenImageProvider;
     recommended: boolean;
     title: string;
     alias: string;
     detail: string;
     capability: string;
     triggerLabel: string;
+    compactLabel: string;
 };
 
 const FAMILY_IDS: FamilyId[] = ["gpt-image", "gemini", "grok", "other"];
@@ -41,7 +42,7 @@ export function ImageModelPicker({ config, value, onChange, className, fullWidth
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const [family, setFamily] = useState<FamilyId>("gpt-image");
-    const lastSelectionByFamily = useRef<Partial<Record<FamilyId, string>>>({});
+    const [provider, setProvider] = useState<SuperTokenImageProvider>("adobe");
     const options = useMemo(() => selectableModelsByCapability(config, "image"), [config]);
     const items = useMemo(() => options.map((option) => buildImageOption(config, option, t)), [config, options, t]);
     const current = value && options.includes(value) ? value : "";
@@ -56,26 +57,15 @@ export function ImageModelPicker({ config, value, onChange, className, fullWidth
         }
         if (nextOpen) {
             window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
-            if (selected) setFamily(selected.family);
+            if (selected) {
+                setFamily(selected.family);
+                if (selected.provider) setProvider(selected.provider);
+            }
         }
         setOpen(nextOpen);
     };
 
     useCloseOnOtherPicker(pickerId, setOpen);
-
-    useEffect(() => {
-        if (selected) lastSelectionByFamily.current[selected.family] = selected.value;
-    }, [selected]);
-
-    const changeFamily = (nextFamily: FamilyId) => {
-        setFamily(nextFamily);
-        const candidates = items.filter((item) => item.family === nextFamily).sort((a, b) => Number(b.recommended) - Number(a.recommended) || a.order - b.order);
-        const remembered = candidates.find((item) => item.value === lastSelectionByFamily.current[nextFamily]);
-        const next = remembered || candidates[0];
-        if (!next || next.value === current) return;
-        lastSelectionByFamily.current[nextFamily] = next.value;
-        onChange(next.value);
-    };
 
     return (
         <PopoverPrimitive.Root open={open} onOpenChange={changeOpen}>
@@ -94,9 +84,10 @@ export function ImageModelPicker({ config, value, onChange, className, fullWidth
                     aria-haspopup="dialog"
                     aria-expanded={open}
                     title={selected?.triggerLabel || pickerPlaceholder}
+                    aria-label={selected?.triggerLabel || pickerPlaceholder}
                 >
                     {selected ? <FamilyIcon family={selected.family} /> : <Settings2 className="size-4 shrink-0 opacity-70" />}
-                    <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{selected?.triggerLabel || pickerPlaceholder}</span>
+                    <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{selected?.compactLabel || pickerPlaceholder}</span>
                     <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
                 </button>
             </PopoverPrimitive.Trigger>
@@ -119,10 +110,10 @@ export function ImageModelPicker({ config, value, onChange, className, fullWidth
                         selectedValue={current}
                         family={family}
                         compact={compact}
-                        onFamilyChange={changeFamily}
+                        provider={provider}
+                        onProviderChange={setProvider}
+                        onFamilyChange={setFamily}
                         onSelect={(nextValue) => {
-                            const next = items.find((item) => item.value === nextValue);
-                            if (next) lastSelectionByFamily.current[next.family] = nextValue;
                             onChange(nextValue);
                             setOpen(false);
                         }}
@@ -133,10 +124,12 @@ export function ImageModelPicker({ config, value, onChange, className, fullWidth
     );
 }
 
-function ImagePickerPanel({ items, selectedValue, family, compact, onFamilyChange, onSelect }: {
+function ImagePickerPanel({ items, selectedValue, family, provider, compact, onFamilyChange, onProviderChange, onSelect }: {
     items: ImageOption[];
     selectedValue: string;
     family: FamilyId;
+    provider: SuperTokenImageProvider;
+    onProviderChange: (provider: SuperTokenImageProvider) => void;
     compact: boolean;
     onFamilyChange: (family: FamilyId) => void;
     onSelect: (value: string) => void;
@@ -144,7 +137,9 @@ function ImagePickerPanel({ items, selectedValue, family, compact, onFamilyChang
     const { t } = useTranslation();
     const families = FAMILY_IDS.filter((familyId) => items.some((item) => item.family === familyId));
     const activeFamily = families.includes(family) ? family : families[0] || "other";
-    const visibleItems = items.filter((item) => item.family === activeFamily).sort((a, b) => a.order - b.order);
+    const providers = (["adobe", "azure", "third-party"] as const).filter((value) => items.some((item) => item.family === "gpt-image" && item.provider === value));
+    const activeProvider = providers.find((value) => value === provider) || providers[0];
+    const visibleItems = items.filter((item) => item.family === activeFamily && (activeFamily !== "gpt-image" || item.provider === activeProvider)).sort((a, b) => a.order - b.order);
 
     return (
         <section className={cn("flex min-h-0 flex-col overflow-hidden", compact ? "max-h-[min(420px,var(--radix-popover-content-available-height))]" : "max-h-[min(540px,var(--radix-popover-content-available-height))]")}>
@@ -166,17 +161,21 @@ function ImagePickerPanel({ items, selectedValue, family, compact, onFamilyChang
                 ))}
             </div>
 
+            {activeFamily === "gpt-image" ? (
+                <div className="flex shrink-0 gap-4 overflow-x-auto border-b border-border px-4" aria-label={t("config.channelEditor.provider")}>
+                    {providers.map((value) => (
+                        <button key={value} type="button" aria-pressed={activeProvider === value} onClick={() => onProviderChange(value)} className={cn("shrink-0 border-b-2 px-1 py-3 text-[13px] transition-colors", activeProvider === value ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                            {t(`settingsPanels.imageModelPicker.providers.${value}`)}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
             <div className={cn("min-h-0 flex-1 overflow-y-auto", compact ? "px-2 py-2" : "px-3 py-3 sm:px-4")}>
                 {visibleItems.length ? (
-                    <div className="space-y-3">
-                        {[...new Set(visibleItems.map((item) => item.group))].map((group) => (
-                            <div key={group}>
-                                {group ? <div className="mb-1 px-2 text-[13px] font-medium text-foreground">{group}</div> : null}
-                                <div className={cn("grid gap-1", !group && "sm:grid-cols-2")}>
-                                    {visibleItems.filter((item) => item.group === group).map((item) => (
-                                        <ImageOptionCard key={item.value} item={item} selected={item.value === selectedValue} compact={compact} onSelect={onSelect} />
-                                    ))}
-                                </div>
+                    <div className={cn(activeFamily === "gpt-image" ? "divide-y divide-border" : "grid gap-1 sm:grid-cols-2")}>
+                        {visibleItems.map((item) => (
+                            <div key={item.value} className={activeFamily === "gpt-image" ? "py-1 first:pt-0 last:pb-0" : undefined}>
+                                <ImageOptionCard item={item} selected={item.value === selectedValue} compact={compact} onSelect={onSelect} />
                             </div>
                         ))}
                     </div>
@@ -203,14 +202,14 @@ function ImageOptionCard({ item, selected, compact, onSelect }: { item: ImageOpt
                 selected ? "bg-accent" : "hover:bg-accent/60",
             )}
         >
-            <span className={cn("min-w-0 flex-1", item.group && "flex flex-wrap items-center justify-between gap-x-3 gap-y-1")}>
+            <span className={cn("min-w-0 flex-1", item.family === "gpt-image" && "flex flex-wrap items-center justify-between gap-x-3 gap-y-1")}>
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className={cn("break-words font-medium", compact ? "text-[13px]" : "text-sm")}>{item.group ? item.alias : item.title}</span>
-                    {item.alias && !item.group ? <span className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.alias}</span> : null}
+                    <span className={cn("break-words font-medium", compact ? "text-[13px]" : "text-sm")}>{item.title}</span>
+                    {item.alias && item.family !== "gpt-image" ? <span className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-xs")}>{item.alias}</span> : null}
                     {item.recommended ? <span className={cn("inline-flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400", compact ? "text-[11px]" : "text-xs")}><Sparkles className="size-3" />{t("settingsPanels.imageModelPicker.recommended")}</span> : null}
                 </span>
-                <span className={cn("block text-muted-foreground", !item.group && "mt-1.5", compact ? "text-[11px]" : "text-xs")}>{item.detail}</span>
-                {!item.group ? <span className={cn("mt-1 block font-medium text-foreground/75", compact ? "text-[11px]" : "text-xs")}>{item.capability}</span> : null}
+                <span className={cn("block text-muted-foreground", !item.family === "gpt-image" && "mt-1.5", compact ? "text-[11px]" : "text-xs")}>{item.detail}</span>
+                {item.family !== "gpt-image" ? <span className={cn("mt-1 block font-medium text-foreground/75", compact ? "text-[11px]" : "text-xs")}>{item.capability}</span> : null}
             </span>
             <span className={cn("mt-1 flex shrink-0 items-center justify-center rounded-full border", compact ? "size-[18px]" : "size-5", selected ? "border-foreground bg-foreground text-background" : "border-muted-foreground/55")}>
                 {selected ? <Check className={compact ? "size-3" : "size-3.5"} strokeWidth={3} /> : null}
@@ -230,13 +229,13 @@ function buildImageOption(config: AiConfig, value: string, t: TFunction): ImageO
             value,
             family: "other",
             order: 0,
-            group: "",
             recommended: false,
             title: model,
             alias: channel?.name || t("settingsPanels.imageModelPicker.customProvider"),
             detail: modelOptionLabel(config, value),
             capability: t("settingsPanels.imageModelPicker.customModel"),
             triggerLabel: modelOptionLabel(config, value),
+            compactLabel: modelOptionLabel(config, value),
         };
     }
 
@@ -255,13 +254,14 @@ function buildImageOption(config: AiConfig, value: string, t: TFunction): ImageO
         value,
         family: capability.family,
         order: capability.family === "gpt-image" ? (capability.label.includes("Sunburst") ? 0 : capability.label.includes("Flare") ? 10 : 20) + providerOrder(capability.provider) : capability.positioning === "fast" ? 0 : 1,
-        group: capability.family === "gpt-image" ? capability.label : "",
-        recommended: capability.provider === "adobe" || capability.alias === "small-banana",
-        title: capability.label,
+        provider: capability.provider,
+        recommended: capability.alias === "small-banana",
+        title: capability.family === "gpt-image" ? capability.label.replace(/^GPT Image /, "") : capability.label,
         alias: capability.family === "gpt-image" ? provider : alias,
         detail: [positioning, resolution, outputs].filter(Boolean).join(" · "),
         capability: t("settingsPanels.imageModelPicker.generateAndEdit"),
         triggerLabel,
+        compactLabel: capability.family === "gpt-image" ? `${capability.provider === "azure" ? "Azure" : provider} ${capability.label.replace(/^GPT Image /, "")}` : triggerLabel,
     };
 }
 
